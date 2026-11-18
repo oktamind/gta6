@@ -1,67 +1,110 @@
 // Sound, all synthesized with WebAudio — no audio files, nothing fetched.
-// Engine hum (oscillator pitch follows speed), gunshots (noise burst), siren (two-tone loop
-// while wanted), pickup blips and a mission-complete jingle. M toggles mute.
-// v2 adds the car radio (four synth stations in v3, Q cycles), a NOS whoosh, a helicopter
-// rotor thump, a drift screech and a shop till blip — all synthesized live.
-// v3 adds a rifle crack (deeper, longer than the pistol) and race countdown / win stingers.
+// Engine hum (oscillator pitch follows speed), gunshots (noise burst), siren
+// (two-tone loop while wanted), pickup blips and a mission-complete jingle.
+// M toggles mute. The radio is four synth stations (Q cycles), plus a NOS
+// whoosh, a helicopter rotor thump, a drift screech and a shop till blip —
+// all synthesized live. The rifle cracks deeper and longer than the pistol;
+// races get countdown beeps and a win stinger.
+// Feel: every tone is pitch-varied by a deterministic wobble so identical
+// repeats never sound like a machine gun — the variation rides on a counter,
+// never Math.random, so the game stays deterministic under test.
 import { RADIO } from './config.js';
 
 export function createSound() {
   let ctx = null;
   let muted = false;
-  let engineOsc = null;
-  let engineGain = null;
-  let sirenOsc = null;
-  let sirenGain = null;
-  let sirenTimer = 0;
-  // Radio state (v2): station index, on/off, next-note scheduler.
-  let radioStation = 0;
-  let radioOn = true;
-  let radioStep = 0;
-  let radioNextT = 0;
-  let radioGain = null;
-  let heliGain = null;
-  let heliOsc = null;
-  let heliTimer = 0;
+  // Live buses, built once by ensure().
+  let engineOsc = null, engineGain = null;
+  let sirenOsc = null, sirenGain = null, sirenTimer = 0;
+  let radioGain = null, radioStation = 0, radioOn = true;
+  let radioStep = 0, radioNextT = 0;
+  let heliOsc = null, heliGain = null, heliTimer = 0;
+  // Deterministic pitch wobble: each tone advances the counter and detunes
+  // by up to ±6% on a fixed sine, so repeats stay alive but reproducible.
+  let voice = 0;
+  const detune = () => 1 + Math.sin((voice += 1) * 2.4) * 0.06;
+
+  function makeBus(type, freq, filterFreq) {
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    if (filterFreq) {
+      const filt = ctx.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.value = filterFreq;
+      osc.connect(filt).connect(gain);
+    } else {
+      osc.connect(gain);
+    }
+    gain.connect(ctx.destination);
+    osc.start();
+    return { osc, gain };
+  }
 
   function ensure() {
     if (ctx) return ctx;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       ctx = new AC();
-      engineOsc = ctx.createOscillator();
-      engineOsc.type = 'sawtooth';
-      engineOsc.frequency.value = 50;
-      engineGain = ctx.createGain();
-      engineGain.gain.value = 0;
-      const filt = ctx.createBiquadFilter();
-      filt.type = 'lowpass';
-      filt.frequency.value = 420;
-      engineOsc.connect(filt).connect(engineGain).connect(ctx.destination);
-      engineOsc.start();
-      sirenOsc = ctx.createOscillator();
-      sirenOsc.type = 'sine';
-      sirenOsc.frequency.value = 700;
-      sirenGain = ctx.createGain();
-      sirenGain.gain.value = 0;
-      sirenOsc.connect(sirenGain).connect(ctx.destination);
-      sirenOsc.start();
-      // Radio bus (v2) + heli rotor bus (v2): quiet gains, driven by stepRadio/stepHeli.
+      const eng = makeBus('sawtooth', 50, 420);
+      engineOsc = eng.osc; engineGain = eng.gain;
+      const sir = makeBus('sine', 700, 0);
+      sirenOsc = sir.osc; sirenGain = sir.gain;
       radioGain = ctx.createGain();
       radioGain.gain.value = 0.05;
       radioGain.connect(ctx.destination);
-      heliOsc = ctx.createOscillator();
-      heliOsc.type = 'square';
-      heliOsc.frequency.value = 22;
-      heliGain = ctx.createGain();
-      heliGain.gain.value = 0;
-      const heliFilt = ctx.createBiquadFilter();
-      heliFilt.type = 'lowpass';
-      heliFilt.frequency.value = 220;
-      heliOsc.connect(heliFilt).connect(heliGain).connect(ctx.destination);
-      heliOsc.start();
+      const hel = makeBus('square', 22, 220);
+      heliOsc = hel.osc; heliGain = hel.gain;
     } catch { ctx = null; }
     return ctx;
+  }
+
+  // One short oscillator tone. `when` delays it (for jingles); every tone
+  // gets the deterministic pitch wobble.
+  function note(freq, dur, type, vol, when = 0) {
+    if (!ensure() || muted) return;
+    const t = ctx.currentTime + when;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq * detune();
+    g.gain.setValueAtTime(vol || 0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(ctx.destination);
+    o.start(t);
+    o.stop(t + dur);
+  }
+
+  // A noise burst, optionally low-passed. The buffer is white noise by
+  // nature; its randomness never touches game state or screenshots.
+  function burst(dur, vol, lowpass) {
+    if (!ensure() || muted) return;
+    const t = ctx.currentTime;
+    const len = Math.floor(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const g = ctx.createGain();
+    g.gain.value = vol;
+    if (lowpass) {
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = lowpass;
+      src.connect(f).connect(g).connect(ctx.destination);
+    } else {
+      src.connect(g).connect(ctx.destination);
+    }
+    src.start(t);
+  }
+
+  // A rising line of notes, `stepMs` apart — the jingle shape for mission
+  // wins, busts and race wins.
+  function arpeggio(freqs, stepMs, dur, type, vol) {
+    freqs.forEach((f, i) => note(f, dur, type, vol, (i * stepMs) / 1000));
   }
 
   // One radio note: a short triangle blip on the current station's scale.
@@ -84,60 +127,26 @@ export function createSound() {
     radioStep += 1;
   }
 
-  function blip(freq, dur, type, vol) {
-    if (!ensure() || muted) return;
-    const t = ctx.currentTime;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = type || 'sine';
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(vol || 0.15, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g).connect(ctx.destination);
-    o.start(t);
-    o.stop(t + dur);
-  }
-
-  function noise(dur, vol, lowpass) {
-    if (!ensure() || muted) return;
-    const t = ctx.currentTime;
-    const len = Math.floor(ctx.sampleRate * dur);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    const g = ctx.createGain();
-    g.gain.value = vol;
-    if (lowpass) {
-      const f = ctx.createBiquadFilter();
-      f.type = 'lowpass';
-      f.frequency.value = lowpass;
-      src.connect(f).connect(g).connect(ctx.destination);
-    } else {
-      src.connect(g).connect(ctx.destination);
-    }
-    src.start(t);
-  }
+  const SHOTS = {
+    smg: () => burst(0.12, 0.35, 2600),
+    shotgun: () => burst(0.22, 0.45, 1200),
+    rifle: () => { burst(0.28, 0.5, 900); note(180, 0.18, 'sawtooth', 0.2); },
+    pistol: () => burst(0.12, 0.35, 1800),
+  };
 
   return {
     unlock() { ensure(); if (ctx && ctx.state === 'suspended') ctx.resume(); },
     toggleMute() { muted = !muted; return muted; },
     get muted() { return muted; },
-    // v3: shoot takes the weapon kind — the rifle cracks deeper and longer than
+    // shoot takes the weapon kind — the rifle cracks deeper and longer than
     // the pistol, the SMG stays a fast bark, the shotgun a wide thump.
-    shoot(kind) {
-      if (kind === 'smg') noise(0.12, 0.35, 2600);
-      else if (kind === 'shotgun') noise(0.22, 0.45, 1200);
-      else if (kind === 'rifle') { noise(0.28, 0.5, 900); blip(180, 0.18, 'sawtooth', 0.2); }
-      else noise(0.12, 0.35, 1800);
-    },
-    punch() { noise(0.08, 0.25, 900); },
-    pickup() { blip(880, 0.12, 'sine', 0.2); blip(1320, 0.18, 'sine', 0.15); },
-    cash() { blip(660, 0.1, 'triangle', 0.2); setTimeout(() => blip(990, 0.16, 'triangle', 0.2), 90); },
-    missionDone() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => blip(f, 0.22, 'triangle', 0.22), i * 110)); },
-    busted() { [392, 330, 262].forEach((f, i) => setTimeout(() => blip(f, 0.3, 'sawtooth', 0.18), i * 160)); },
-    honk() { blip(370, 0.25, 'square', 0.12); },
+    shoot(kind) { (SHOTS[kind] || SHOTS.pistol)(); },
+    punch() { burst(0.08, 0.25, 900); },
+    pickup() { note(880, 0.12, 'sine', 0.2); note(1320, 0.18, 'sine', 0.15, 0); },
+    cash() { note(660, 0.1, 'triangle', 0.2); note(990, 0.16, 'triangle', 0.2, 0.09); },
+    missionDone() { arpeggio([523, 659, 784, 1046], 110, 0.22, 'triangle', 0.22); },
+    busted() { arpeggio([392, 330, 262], 160, 0.3, 'sawtooth', 0.18); },
+    honk() { note(370, 0.25, 'square', 0.12); },
     engine(speed01, on) {
       if (!ensure() || muted) { if (engineGain) engineGain.gain.value = 0; return; }
       engineOsc.frequency.value = 45 + speed01 * 130;
@@ -150,7 +159,7 @@ export function createSound() {
       sirenOsc.frequency.value = twoTone;
       sirenGain.gain.value = 0.035;
     },
-    // v2: radio scheduler — call every frame; notes fire on the station's tempo.
+    // Radio scheduler — call every frame; notes fire on the station's tempo.
     stepRadio(dt, inCar) {
       if (!ensure() || muted || !radioOn || !inCar) return;
       radioNextT -= dt;
@@ -167,10 +176,10 @@ export function createSound() {
     },
     get radioStation() { return RADIO[radioStation % RADIO.length]; },
     radioToggle() { radioOn = !radioOn; return radioOn; },
-    nos() { noise(0.45, 0.22, 3200); blip(1200, 0.3, 'sawtooth', 0.08); },
-    // v3: the overheat clunk — a short low thud when the NOS kit locks out.
-    nosOverheat() { blip(140, 0.25, 'square', 0.2); noise(0.15, 0.15, 600); },
-    drift() { noise(0.18, 0.12, 5200); },
+    nos() { burst(0.45, 0.22, 3200); note(1200, 0.3, 'sawtooth', 0.08); },
+    // The overheat clunk — a short low thud when the NOS kit locks out.
+    nosOverheat() { note(140, 0.25, 'square', 0.2); burst(0.15, 0.15, 600); },
+    drift() { burst(0.18, 0.12, 5200); },
     heli(active, dt) {
       if (!ensure() || muted) { if (heliGain) heliGain.gain.value = 0; return; }
       if (!active) { if (heliGain) heliGain.gain.value = 0; return; }
@@ -178,9 +187,9 @@ export function createSound() {
       heliOsc.frequency.value = 20 + Math.sin(heliTimer * 9) * 4;
       heliGain.gain.value = 0.05;
     },
-    till() { blip(1046, 0.1, 'triangle', 0.2); setTimeout(() => blip(1568, 0.18, 'triangle', 0.18), 90); },
-    // v3: street-race stingers — three countdown beeps and a rising win arpeggio.
-    raceBeep() { blip(660, 0.12, 'square', 0.18); },
-    raceWin() { [523, 659, 784, 1046, 1318].forEach((f, i) => setTimeout(() => blip(f, 0.2, 'triangle', 0.22), i * 100)); },
+    till() { note(1046, 0.1, 'triangle', 0.2); note(1568, 0.18, 'triangle', 0.18, 0.09); },
+    // Street-race stingers — three countdown beeps and a rising win arpeggio.
+    raceBeep() { note(660, 0.12, 'square', 0.18); },
+    raceWin() { arpeggio([523, 659, 784, 1046, 1318], 100, 0.2, 'triangle', 0.22); },
   };
 }
