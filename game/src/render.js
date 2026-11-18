@@ -1,7 +1,9 @@
 // Drawing only, in three.js: the city, the cars, the people, the light. The renderer owns the
 // THREE scene and every mesh; gameplay modules own the numbers. Meshes are pooled per entity
 // (one group per car / ped) and moved each frame — nothing is rebuilt after boot except
-// tracers and the mission beacon.
+// tracers and the mission beacon. v2 adds the police helicopter (body + spinning rotor +
+// spotlight cone), green/amber beacons for the safehouse and shop, and a NOS flame
+// cone behind a boosting car — all built from primitives, no new assets.
 import * as THREE from 'three';
 import { CITY, PALETTE } from './config.js';
 
@@ -177,11 +179,13 @@ export function createRenderer(canvas, city) {
   }
 
   // Landmark signs: floating coloured beacons so the player can find places.
+  // v2: safehouse beacons are green, the shop is amber, the rest stay gold.
   const landmarkMeshes = {};
   for (const lm of Object.values(city.landmarks)) {
+    const beaconColor = lm.id === 'safehouse' ? 0x58c96b : lm.id === 'shop' ? 0xffb02e : 0xffd23e;
     const beacon = new THREE.Mesh(
       new THREE.CylinderGeometry(0.5, 0.5, 14, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffd23e, transparent: true, opacity: 0.35 }),
+      new THREE.MeshBasicMaterial({ color: beaconColor, transparent: true, opacity: 0.35 }),
     );
     beacon.position.set(lm.x, 7, lm.z);
     scene.add(beacon);
@@ -219,6 +223,44 @@ export function createRenderer(canvas, city) {
   cap.position.y = 1.86;
   playerMesh.add(cap);
   scene.add(playerMesh);
+
+  // v2: police helicopter — dark body, glass nose, tail boom, spinning rotor,
+  // and a spotlight cone that tracks the player. Built once, moved in sync().
+  const heliGroup = new THREE.Group();
+  const heliBody = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.6, 5.2), new THREE.MeshLambertMaterial({ color: 0x1e2a3a }));
+  heliGroup.add(heliBody);
+  const heliNose = new THREE.Mesh(new THREE.SphereGeometry(1.0, 10, 8), new THREE.MeshLambertMaterial({ color: 0x2f7fe0 }));
+  heliNose.position.set(0, -0.2, 2.4);
+  heliGroup.add(heliNose);
+  const heliTail = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 4.2), new THREE.MeshLambertMaterial({ color: 0x1e2a3a }));
+  heliTail.position.set(0, 0.3, -4.2);
+  heliGroup.add(heliTail);
+  const heliRotor = new THREE.Mesh(new THREE.BoxGeometry(11, 0.12, 0.5), new THREE.MeshLambertMaterial({ color: 0x11151c }));
+  heliRotor.position.y = 1.1;
+  heliGroup.add(heliRotor);
+  const heliRotor2 = heliRotor.clone();
+  heliRotor2.rotation.y = Math.PI / 2;
+  heliGroup.add(heliRotor2);
+  const heliSpot = new THREE.Mesh(
+    new THREE.ConeGeometry(7, 34, 16, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  heliSpot.position.y = -17;
+  heliGroup.add(heliSpot);
+  const heliLight = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff2b0 }));
+  heliLight.position.y = -0.9;
+  heliGroup.add(heliLight);
+  heliGroup.visible = false;
+  scene.add(heliGroup);
+
+  // v2: NOS flame — a small orange cone behind the player's car while boosting.
+  const nosFlame = new THREE.Mesh(
+    new THREE.ConeGeometry(0.55, 2.2, 8),
+    new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.9 }),
+  );
+  nosFlame.rotation.x = -Math.PI / 2;
+  nosFlame.visible = false;
+  scene.add(nosFlame);
 
   // Tracers: one reusable line for gunfire.
   const tracerGeo = new THREE.BufferGeometry();
@@ -330,6 +372,33 @@ export function createRenderer(canvas, city) {
       // Landmark beacons bob gently
       for (const [id, mesh] of Object.entries(landmarkMeshes)) {
         mesh.position.y = 7 + Math.sin(time * 1.2 + id.length) * 0.6;
+      }
+      // v2: helicopter — visible at 4-5 stars, rotor spins, spotlight tracks the player.
+      if (state.heli) {
+        const h = state.heli;
+        heliGroup.visible = true;
+        heliGroup.position.set(h.x, h.y, h.z);
+        heliGroup.rotation.y = h.angle;
+        heliRotor.rotation.y = h.rotor;
+        heliRotor2.rotation.y = h.rotor + Math.PI / 2;
+        // Spotlight cone stays vertical: the heli hovers almost directly above
+        // the player, so a vertical cone already covers the spotlight target.
+        heliSpot.rotation.set(0, 0, 0);
+      } else {
+        heliGroup.visible = false;
+      }
+      // v2: NOS flame behind the player's car while boosting.
+      if (state.player.inCar && state.player.car && state.player.car.nosActive) {
+        const car = state.player.car;
+        const bx = Math.sin(car.angle), bz = Math.cos(car.angle);
+        nosFlame.visible = true;
+        nosFlame.position.set(car.x - bx * 2.6, 0.7, car.z - bz * 2.6);
+        nosFlame.rotation.y = car.angle;
+        nosFlame.rotation.x = -Math.PI / 2;
+        const fl = 1 + Math.sin(time * 40) * 0.25;
+        nosFlame.scale.set(fl, fl, fl);
+      } else {
+        nosFlame.visible = false;
       }
     },
     showTracer(from, to, ttl) {

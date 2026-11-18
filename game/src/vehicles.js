@@ -3,15 +3,18 @@
 // building collision and car-car push-out. Traffic follows the road graph (straight along one
 // road, random turn at each intersection). Police chase the player with a faster top speed and
 // ram; on-foot cops are handled in peds.js.
-import { CAR, CITY } from './config.js';
+import { CAR, CITY, NOS } from './config.js';
 import { collideBuildings, nearestRoadPoint, randomRoadPoint } from './world.js';
-import { pick } from './random.js';
+import { pick, clamp } from './random.js';
 
 export function makeCar(x, z, angle, color, opts = {}) {
   return {
     x, z, angle, speed: 0, steer: 0,
     color, police: !!opts.police, traffic: !!opts.traffic,
     parked: !!opts.parked, stolen: false, hp: 100,
+    // v2: NOS tank (0-100) + drift state. NOS is spent by the driver, refilled
+    // slowly, at the safehouse, or bought at the shop.
+    nos: NOS.max, drifting: false, nosActive: false,
     // traffic AI
     axis: opts.axis || 'z', dir: opts.dir || 1, cruise: opts.cruise || 9,
     targetSpeed: opts.cruise || 9,
@@ -21,22 +24,59 @@ export function makeCar(x, z, angle, color, opts = {}) {
   };
 }
 
+// v2: the SBPD helicopter. No mesh here — just the numbers; render.js draws it.
+// It hovers above the player, keeps pace, and its spotlight marks the player.
+export function makeHeli(x, z) {
+  return { x, z, y: 34, angle: 0, rotor: 0, spotX: x, spotZ: z, mesh: null, rotorMesh: null, spotMesh: null };
+}
+
+export function stepHeli(heli, targetX, targetZ, dt) {
+  const dx = targetX - heli.x, dz = targetZ - heli.z;
+  const dist = Math.hypot(dx, dz);
+  const sp = Math.min(26, dist * 0.8 + 8);
+  if (dist > 0.5) {
+    heli.x += (dx / dist) * sp * dt;
+    heli.z += (dz / dist) * sp * dt;
+    heli.angle = Math.atan2(dx, dz);
+  }
+  heli.rotor += dt * 38;
+  heli.spotX = targetX;
+  heli.spotZ = targetZ;
+  return heli;
+}
+
 function carForward(car) {
   return { x: Math.sin(car.angle), z: Math.cos(car.angle) };
 }
 
-// One physics step for a driven car. `drive` is -1..1 (throttle), `steerIn` -1..1, handbrake bool.
-export function stepDrivenCar(car, drive, steerIn, handbrake, dt, city) {
+// One physics step for a driven car. `drive` is -1..1 (throttle), `steerIn` -1..1,
+// handbrake bool (Space: drift), `nos` bool (Shift: NOS boost, v2).
+export function stepDrivenCar(car, drive, steerIn, handbrake, dt, city, nos = false) {
   const targetSteer = steerIn * CAR.steer;
   car.steer += (targetSteer - car.steer) * Math.min(1, dt * 8);
   const accel = drive > 0 ? CAR.accel * drive : drive < 0 ? -CAR.reverseAccel : 0;
   car.speed += accel * dt;
   if (drive === 0) car.speed -= car.speed * Math.min(1, dt * 1.2); // rolling drag
-  if (handbrake) car.speed -= car.speed * Math.min(1, dt * 4);
-  const maxF = CAR.maxSpeed, maxR = -CAR.maxReverse;
+  // v2 drift: handbrake cuts grip — the car slides, turns sharper, and NOS refills.
+  car.drifting = !!handbrake && Math.abs(car.speed) > 8;
+  if (handbrake) {
+    car.speed -= car.speed * Math.min(1, dt * 2.2);
+    car.nos = clamp(car.nos + NOS.driftRefundPerSec * dt, 0, NOS.max);
+  }
+  // v2 NOS: hold Shift while moving forward. Burns the tank, lifts the top speed.
+  car.nosActive = !!nos && car.nos > 0 && drive > 0 && car.speed > 4;
+  if (car.nosActive) {
+    car.nos = clamp(car.nos - NOS.drainPerSec * dt, 0, NOS.max);
+    car.speed += CAR.accel * 0.9 * dt;
+  } else {
+    car.nos = clamp(car.nos + NOS.regenPerSec * dt, 0, NOS.max);
+  }
+  const maxF = car.nosActive ? CAR.maxSpeed * NOS.boostMult : CAR.maxSpeed;
+  const maxR = -CAR.maxReverse;
   car.speed = Math.max(maxR, Math.min(maxF, car.speed));
-  // Steering only bites while moving; sharper at low speed.
-  const turn = car.steer * (car.speed / CAR.maxSpeed) * 2.4 * dt * (car.speed >= 0 ? 1 : -1);
+  // Steering only bites while moving; sharper at low speed, sharper again in a drift.
+  const driftMult = car.drifting ? 1.7 : 1;
+  const turn = car.steer * (car.speed / CAR.maxSpeed) * 2.4 * driftMult * dt * (car.speed >= 0 ? 1 : -1);
   car.angle += turn;
   const f = carForward(car);
   car.x += f.x * car.speed * dt;
@@ -44,6 +84,9 @@ export function stepDrivenCar(car, drive, steerIn, handbrake, dt, city) {
   const p = { x: car.x, z: car.z };
   if (collideBuildings(city, p, CAR.length / 2)) {
     car.x = p.x; car.z = p.z;
+    // v2 (revision): a hard wall hit damages the car — this is what makes the
+    // smuggle mission's damage rule real, and what the safehouse repairs.
+    if (Math.abs(car.speed) > 12) car.hp = Math.max(0, car.hp - 6);
     car.speed *= -0.25; // bounce off the wall
   }
   return car;

@@ -1,6 +1,8 @@
 // Pedestrians and on-foot enemies.
 // Peds stroll the sidewalks, cross roads at intersections, and flee from gunfire. Gull
 // enforcers (mission 3) and on-foot cops stand their ground, chase the player and punch/shoot.
+// v2: a shopkeeper stands at Solmar Arms & Ammo and a mechanic at the safehouse —
+// both stay put, never flee, and never count as targets for missions.
 import { CITY } from './config.js';
 import { collideBuildings, nearestRoadPoint, randomRoadPoint } from './world.js';
 import { pick, range } from './random.js';
@@ -44,6 +46,11 @@ export function stepPeds(peds, dt, city, player, gunfire, random) {
     const dx = player.x - ped.x, dz = player.z - ped.z;
     const dist = Math.hypot(dx, dz);
 
+    // v2 keepers never move, never flee, never fight — they run the shop/safehouse.
+    if (ped.kind === 'shopkeeper' || ped.kind === 'mechanic') {
+      ped.angle = Math.PI;
+      continue;
+    }
     if (ped.kind === 'ped') {
       if (gunfire && Math.hypot(ped.x - gunfire.x, ped.z - gunfire.z) < 26) {
         ped.state = 'flee';
@@ -121,6 +128,19 @@ export function spawnGulls(random, x, z, count) {
     gulls.push(g);
   }
   return gulls;
+}
+
+// v2: stationary shopkeeper / mechanic peds. They stand at their landmark's
+// approach point, face the street, and never walk off.
+export function spawnKeeper(kind, x, z) {
+  return {
+    x, z, angle: Math.PI, speed: 0, hp: 100,
+    kind, // 'shopkeeper' | 'mechanic'
+    color: kind === 'shopkeeper' ? 0xffb02e : 0x58c96b,
+    state: 'stand', stateT: 0, targetX: x, targetZ: z,
+    fleeX: 0, fleeZ: 0, attackCooldown: 0, shootCooldown: 0,
+    mesh: null, alive: true, paid: false, taxi: false,
+  };
 }
 
 // Spawn an on-foot cop near the player.

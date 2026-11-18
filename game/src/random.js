@@ -17,3 +17,26 @@ export function pick(random, array) {
 export function range(random, min, max) {
   return min + random() * (max - min);
 }
+
+// v2 helpers, all seeded through the same RNG so screenshots stay deterministic.
+export function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+export function shuffle(random, array) {
+  const a = array.slice();
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+export function choice(random, array) {
+  return array[Math.floor(random() * array.length)];
+}
+
+// Pick `n` distinct items from an array (Fisher-Yates prefix).
+export function sample(random, array, n) {
+  return shuffle(random, array).slice(0, Math.min(n, array.length));
+}

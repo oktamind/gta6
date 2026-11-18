@@ -25,6 +25,14 @@
   #health-bar { height: 10px; background: #2a3342; border-radius: 5px; margin-top: 4px; overflow: hidden; }
   #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #e5484d, #ffb02e 55%, #58c96b); transition: width 0.2s; }
   #ammo { font-size: 15px; color: var(--ink); }
+  #armor { font-size: 15px; color: var(--blue); }
+  #district { font-size: 13px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+  #radio { font-size: 14px; color: var(--amber); }
+  #nos-wrap { width: 200px; }
+  #nos-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+  #nos-bar { height: 8px; background: #2a3342; border-radius: 4px; margin-top: 4px; overflow: hidden; }
+  #nos-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff7a1a, #ffb02e); transition: width 0.15s; }
+  #heli-warn { display: none; font-size: 14px; color: #ff7a1a; font-weight: 700; }
   #hud-top-right { top: 14px; right: 14px; text-align: right; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
   #wanted { font-size: 26px; letter-spacing: 4px; color: var(--amber); text-shadow: 0 0 12px rgba(255,176,46,0.6); }
   #wanted.off { color: #3a4356; text-shadow: none; }
@@ -72,9 +80,14 @@
   <div class="chip" id="cash">$0</div>
   <div class="chip" id="health-wrap"><div id="health-label"><span>HEALTH</span><span id="health-num">100</span></div><div id="health-bar"><div id="health-fill"></div></div></div>
   <div class="chip" id="ammo">PISTOL &infin;</div>
+  <div class="chip" id="armor">ARMOR 0</div>
+  <div class="chip" id="nos-wrap"><div id="nos-label"><span>NOS</span><span id="nos-num">NOS 100%</span></div><div id="nos-bar"><div id="nos-fill"></div></div></div>
+  <div class="chip" id="radio">&9834; SOLMAR FM 88.5</div>
 </div>
 <div class="hud" id="hud-top-right">
   <div class="chip" id="wanted">☆☆☆☆☆</div>
+  <div class="chip" id="heli-warn">HELICOPTER OVERHEAD</div>
+  <div class="chip" id="district">Solmar Bay</div>
   <div class="chip" id="clock">DAY 1 &middot; 08:00</div>
 </div>
 <div class="hud" id="objective">
@@ -90,18 +103,20 @@
   <div class="panel">
     <h1>SOLMAR <span>HEIST</span></h1>
     <p class="story">Solmar Bay never sleeps, and neither do its debts. You are <b>Rae Vega</b>, a getaway driver
-    who just burned her last crew. Fixer <b>Delia Voss</b> has five jobs that pay enough to buy your way out —
-    if the Solmar Bay Police Department does not catch you first.</p>
+    who just burned her last crew. Fixer <b>Delia Voss</b> has eight jobs that pay enough to buy your way out —
+    if the Solmar Bay Police Department — and its helicopter — does not catch you first.</p>
     <ul class="keys">
       <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move / drive</li>
       <li><kbd>Mouse</kbd> Look (drag) &middot; <kbd>Click</kbd> Shoot</li>
-      <li><kbd>E</kbd> Steal / exit car &middot; <kbd>Shift</kbd> Sprint</li>
-      <li><kbd>Space</kbd> Jump &middot; <kbd>Shift</kbd> Handbrake in car</li>
-      <li><kbd>P</kbd> Pause &amp; save &middot; <kbd>M</kbd> Sound</li>
-      <li><kbd>R</kbd> Reload SMG &middot; <kbd>H</kbd> Honk</li>
+      <li><kbd>E</kbd> Steal / exit car &middot; <kbd>Shift</kbd> Sprint / NOS in car</li>
+      <li><kbd>Space</kbd> Jump &middot; <kbd>Space</kbd> Drift in car</li>
+      <li><kbd>Q</kbd> Change radio station &middot; <kbd>R</kbd> Reload SMG</li>
+      <li><kbd>P</kbd> Pause &amp; save &middot; <kbd>M</kbd> Sound &middot; <kbd>H</kbd> Honk</li>
+      <li><kbd>1</kbd>–<kbd>4</kbd> Buy at the shop (armor / ammo / NOS / shotgun)</li>
+      <li><kbd>E</kbd> at safehouse: repair, refill NOS, heal &amp; save</li>
     </ul>
-    <p>Steal cars, lose the heat, finish all five jobs. Wanted stars rise when the city sees you do it.
-    Save any time from the pause menu — progress, cash and completed jobs persist in this browser.</p>
+    <p>Steal cars, lose the heat, finish all eight jobs across twelve named districts. Wanted stars rise when the city sees you do it.
+    At four stars the SBPD helicopter comes for you. Save any time from the pause menu — progress, cash and completed jobs persist in this browser.</p>
     <div class="btn-row">
       <button id="btn-start" type="button">Start the story</button>
       <button id="btn-continue" type="button" class="ghost">Continue saved game</button>

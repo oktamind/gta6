@@ -1,6 +1,10 @@
 // Sound, all synthesized with WebAudio — no audio files, nothing fetched.
 // Engine hum (oscillator pitch follows speed), gunshots (noise burst), siren (two-tone loop
 // while wanted), pickup blips and a mission-complete jingle. M toggles mute.
+// v2 adds the car radio (three synth stations, Q cycles), a NOS whoosh, a helicopter
+// rotor thump, a drift screech and a shop till blip — all synthesized live.
+import { RADIO } from './config.js';
+
 export function createSound() {
   let ctx = null;
   let muted = false;
@@ -9,6 +13,15 @@ export function createSound() {
   let sirenOsc = null;
   let sirenGain = null;
   let sirenTimer = 0;
+  // Radio state (v2): station index, on/off, next-note scheduler.
+  let radioStation = 0;
+  let radioOn = true;
+  let radioStep = 0;
+  let radioNextT = 0;
+  let radioGain = null;
+  let heliGain = null;
+  let heliOsc = null;
+  let heliTimer = 0;
 
   function ensure() {
     if (ctx) return ctx;
@@ -32,8 +45,42 @@ export function createSound() {
       sirenGain.gain.value = 0;
       sirenOsc.connect(sirenGain).connect(ctx.destination);
       sirenOsc.start();
+      // Radio bus (v2) + heli rotor bus (v2): quiet gains, driven by stepRadio/stepHeli.
+      radioGain = ctx.createGain();
+      radioGain.gain.value = 0.05;
+      radioGain.connect(ctx.destination);
+      heliOsc = ctx.createOscillator();
+      heliOsc.type = 'square';
+      heliOsc.frequency.value = 22;
+      heliGain = ctx.createGain();
+      heliGain.gain.value = 0;
+      const heliFilt = ctx.createBiquadFilter();
+      heliFilt.type = 'lowpass';
+      heliFilt.frequency.value = 220;
+      heliOsc.connect(heliFilt).connect(heliGain).connect(ctx.destination);
+      heliOsc.start();
     } catch { ctx = null; }
     return ctx;
+  }
+
+  // One radio note: a short triangle blip on the current station's scale.
+  function radioNote() {
+    if (!ctx || muted || !radioOn || !radioGain) return;
+    const st = RADIO[radioStation % RADIO.length];
+    const stepDur = 60 / st.tempo / 2;
+    const degree = st.scale[radioStep % st.scale.length] + 12 * Math.floor(radioStep / st.scale.length) % 2;
+    const freq = st.root * Math.pow(2, degree / 12);
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = radioStep % 4 === 0 ? 'square' : 'triangle';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.09, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + stepDur * 0.9);
+    o.connect(g).connect(radioGain);
+    o.start(t);
+    o.stop(t + stepDur);
+    radioStep += 1;
   }
 
   function blip(freq, dur, type, vol) {
@@ -95,5 +142,32 @@ export function createSound() {
       sirenOsc.frequency.value = twoTone;
       sirenGain.gain.value = 0.035;
     },
+    // v2: radio scheduler — call every frame; notes fire on the station's tempo.
+    stepRadio(dt, inCar) {
+      if (!ensure() || muted || !radioOn || !inCar) return;
+      radioNextT -= dt;
+      if (radioNextT <= 0) {
+        const st = RADIO[radioStation % RADIO.length];
+        radioNextT = 60 / st.tempo / 2;
+        radioNote();
+      }
+    },
+    radioNext() {
+      radioStation = (radioStation + 1) % RADIO.length;
+      radioStep = 0;
+      return RADIO[radioStation];
+    },
+    get radioStation() { return RADIO[radioStation % RADIO.length]; },
+    radioToggle() { radioOn = !radioOn; return radioOn; },
+    nos() { noise(0.45, 0.22, 3200); blip(1200, 0.3, 'sawtooth', 0.08); },
+    drift() { noise(0.18, 0.12, 5200); },
+    heli(active, dt) {
+      if (!ensure() || muted) { if (heliGain) heliGain.gain.value = 0; return; }
+      if (!active) { if (heliGain) heliGain.gain.value = 0; return; }
+      heliTimer += dt;
+      heliOsc.frequency.value = 20 + Math.sin(heliTimer * 9) * 4;
+      heliGain.gain.value = 0.05;
+    },
+    till() { blip(1046, 0.1, 'triangle', 0.2); setTimeout(() => blip(1568, 0.18, 'triangle', 0.18), 90); },
   };
 }

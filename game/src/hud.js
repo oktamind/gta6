@@ -1,7 +1,7 @@
 // HUD: the DOM chips (cash, health, ammo, wanted stars, clock, objective, speed) and the
 // 2D minimap canvas. The minimap draws the road grid, buildings, the player arrow, police,
 // traffic, peds and the mission marker — north-up, scaled to the whole city.
-import { CITY } from './config.js';
+import { CITY, RADIO } from './config.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -13,6 +13,9 @@ export function createHud() {
     speed: $('speed'), gear: $('gear'), hint: $('hint'), toast: $('toast'),
     crosshair: $('crosshair'), vignette: $('vignette'),
     minimap: $('minimap'),
+    // v2 chips: radio station, NOS tank, district, armor, helicopter warning.
+    radio: $('radio'), nosFill: $('nos-fill'), nosNum: $('nos-num'),
+    district: $('district'), armor: $('armor'), heliWarn: $('heli-warn'),
   };
   const mm = els.minimap.getContext('2d');
   let toastTimer = 0;
@@ -62,6 +65,23 @@ export function createHud() {
     for (const ped of state.peds) {
       if (ped.alive && ped.kind === 'ped') mm.fillRect(toX(ped.x) - 1, toY(ped.z) - 1, 2, 2);
     }
+    // v2: safehouse (green square) + shop (amber square) on the minimap.
+    if (state.city.landmarks.safehouse) {
+      const s = state.city.landmarks.safehouse;
+      mm.fillStyle = '#58c96b';
+      mm.fillRect(toX(s.x) - 3, toY(s.z) - 3, 6, 6);
+    }
+    if (state.city.landmarks.shop) {
+      const s = state.city.landmarks.shop;
+      mm.fillStyle = '#ffb02e';
+      mm.fillRect(toX(s.x) - 3, toY(s.z) - 3, 6, 6);
+    }
+    // v2: police helicopter (orange ring) on the minimap.
+    if (state.heli) {
+      mm.strokeStyle = '#ff7a1a';
+      mm.lineWidth = 2;
+      mm.beginPath(); mm.arc(toX(state.heli.x), toY(state.heli.z), 6, 0, Math.PI * 2); mm.stroke();
+    }
     // Police (red/blue)
     for (const car of state.police) {
       mm.fillStyle = '#ff4444';
@@ -98,8 +118,21 @@ export function createHud() {
       els.healthFill.style.width = `${hp}%`;
       setText(els.healthNum, 'hp', String(hp));
       els.vignette.style.opacity = hp < 35 ? String(0.4 + (35 - hp) / 35 * 0.5) : '0';
-      const weapon = state.player.weapon === 'smg' ? `SMG ${state.player.smgAmmo}` : 'PISTOL ∞';
+      const weapon = state.player.weapon === 'smg' ? `SMG ${state.player.smgAmmo}` : state.player.weapon === 'shotgun' ? `SHOTGUN ${state.player.shotgunAmmo}` : 'PISTOL ∞';
       setText(els.ammo, 'ammo', weapon);
+      // v2 chips: radio (only meaningful in a car), NOS tank, district, armor, heli.
+      if (els.radio) {
+        const st = RADIO[state.radioStation || 0];
+        setText(els.radio, 'radio', state.player.inCar ? `♪ ${st.name} — ${st.tag}` : '♪ Radio — get in a car (Q)');
+      }
+      if (els.nosFill) {
+        const nos = state.player.inCar && state.player.car ? Math.round(state.player.car.nos) : Math.round(state.nos || 100);
+        els.nosFill.style.width = `${nos}%`;
+        setText(els.nosNum, 'nos', `NOS ${nos}%`);
+      }
+      if (els.district) setText(els.district, 'district', state.district || 'Solmar Bay');
+      if (els.armor) setText(els.armor, 'armor', `ARMOR ${Math.round(state.player.armor || 0)}`);
+      if (els.heliWarn) els.heliWarn.style.display = state.heli ? 'block' : 'none';
       const stars = '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted);
       setText(els.wanted, 'wanted', stars);
       els.wanted.classList.toggle('off', state.wanted === 0);

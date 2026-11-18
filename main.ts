@@ -6,15 +6,22 @@
 // reads, with the vendored make.fun library.
 //
 // What the player gets: an 8x8-block seeded city (Solmar Bay) at golden hour, on foot and
-// by car. Steal any parked or traffic car (E), drive with arcade physics, traffic that
-// follows the road grid, pedestrians who stroll and flee gunfire, a 5-star wanted system
-// with police cars that ram and on-foot cops that chase, shoot and bust you, five story
-// jobs from fixer Delia Voss (steal wheels, a timed courier run, a shakedown, a hot
-// pursuit, a bank-vault heist ending at the marina), a repeatable taxi side job, health
-// and SMG pickups, a HUD with cash, health, wanted stars, a live clock and a minimap,
-// synthesized WebAudio (engine, gunshots, sirens, jingles — no audio files), and a save
+// by car, across twelve named districts. Steal any parked or traffic car (E), drive with
+// arcade physics plus NOS boost (Shift) and drift handling (Space), traffic that follows
+// the road grid, pedestrians who stroll and flee gunfire, a 5-star wanted system with
+// police cars that ram, on-foot cops that chase, shoot and bust you, and a police
+// helicopter with a spotlight at 4-5 stars that blocks heat decay while overhead, eight
+// story jobs from fixer Delia Voss (steal wheels, a timed courier run, a shakedown, a hot
+// pursuit, a bank-vault heist ending at the marina, a Harbor Lights smuggle run, the
+// Bayfront Grand Prix street race, and the Delia Gambit finale against the SBPD evidence
+// vault), a repeatable taxi side job, a safehouse (heal + repair + NOS refill + save),
+// a shop (armor, SMG ammo, NOS, shotgun), health and SMG pickups, three weapons
+// (pistol, SMG, shotgun), a three-station synth car radio (Q cycles), a HUD with cash,
+// health, armor, NOS, wanted stars, district, a live clock and a minimap, synthesized
+// WebAudio (engine, gunshots, sirens, radio, rotor, jingles — no audio files), and a save
 // in localStorage that keeps cash, jobs and position between visits. Everything — city,
 // characters, vehicles, names, story, art, sound — is original; nothing is from Rockstar.
+// v2: +3 missions (8 total), helicopter, radio, safehouse + shop, NOS/drift, districts.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Screenshots: `node shots.mjs` (headless Chromium, see shots.json for the four scenes).

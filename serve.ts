@@ -10,7 +10,10 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
 const args = process.argv.slice(2);
 const portIndex = args.indexOf('--port');
-const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
+// v2: the port also honours MAKEFUN_PORT so screenshot harnesses can pick a free
+// port without editing the command line (flag still wins over the env var).
+const envPort = Number(process.env.MAKEFUN_PORT ?? '');
+const requested = portIndex === -1 ? (Number.isInteger(envPort) ? envPort : 8080) : Number(args[portIndex + 1]);
 const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
 
 const MIME: Record<string, string> = {
@@ -65,6 +68,9 @@ createServer((request, response) => {
     'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
     'content-length': size,
     'cache-control': 'no-store',
+    // v2: keep the game off other sites' frames and out of MIME sniffing.
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'SAMEORIGIN',
   });
   createReadStream(file).pipe(response);
 }).listen(port, '127.0.0.1', () => {

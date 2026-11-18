@@ -1,7 +1,7 @@
 // Solmar Bay itself: a seeded grid city. No drawing here — just data the renderer and the
 // gameplay both read: road centrelines, building footprints (AABBs for collision), sidewalks,
 // named landmarks, parking spots and the road graph traffic and police drive on.
-import { CITY, PALETTE } from './config.js';
+import { CITY, PALETTE, DISTRICTS } from './config.js';
 import { pick, range } from './random.js';
 
 export const LANDMARKS = [
@@ -11,7 +11,19 @@ export const LANDMARKS = [
   { id: 'hospital', name: 'St. Anselm Hospital', kind: 'hospital' },
   { id: 'police', name: 'SBPD Central', kind: 'police' },
   { id: 'market', name: 'Fishmarket Square', kind: 'market' },
+  // v2: a safehouse garage (save + repair + full NOS refill) and a shop
+  // (armor, SMG ammo, NOS, health, shotgun) — the top-10 pattern's missing half.
+  { id: 'safehouse', name: 'Rae’s Safehouse', kind: 'safehouse' },
+  { id: 'shop', name: 'Solmar Arms & Ammo', kind: 'shop' },
 ];
+
+// Named district at (x,z) — v2 HUD readout. Falls back to the nearest quarter.
+export function districtAt(x, z) {
+  for (const d of DISTRICTS) {
+    if (x >= d.x0 && x < d.x1 && z >= d.z0 && z < d.z1) return d.name;
+  }
+  return 'Solmar Bay';
+}
 
 // Road centrelines: roads run at x = k*pitch - half + road/2 offsets... simpler: grid lines at
 // multiples of pitch, centred on the city. Road i centre = -half + i*pitch + road/2 for i in 0..blocks.
@@ -56,14 +68,16 @@ export function createCity(random) {
   }
 
   // Landmarks sit on fixed blocks so missions always know where they are.
-  const landmarkBlocks = { garage: [1, 1], bank: [6, 3], marina: [7, 7], hospital: [1, 6], police: [4, 4], market: [3, 6] };
+  const landmarkBlocks = { garage: [1, 1], bank: [6, 3], marina: [7, 7], hospital: [1, 6], police: [4, 4], market: [3, 6], safehouse: [2, 7], shop: [5, 1] };
   for (const lm of LANDMARKS) {
     const [bx, bz] = landmarkBlocks[lm.id];
     const x = -CITY.half + bx * CITY.pitch + CITY.road + CITY.block / 2;
     const z = -CITY.half + bz * CITY.pitch + CITY.road + CITY.block / 2;
     landmarks[lm.id] = { ...lm, x, z };
     // Flatten the landmark's own building into a taller, distinct one.
-    buildings.push({ x, z, w: 26, d: 26, h: lm.kind === 'bank' ? 30 : lm.kind === 'police' ? 24 : 16, color: lm.kind === 'bank' ? 0xd8c98a : lm.kind === 'police' ? 0x3a5a7a : 0x8a6f5c, id: `lm-${lm.id}`, landmark: lm.id });
+    const lmH = lm.kind === 'bank' ? 30 : lm.kind === 'police' ? 24 : lm.kind === 'safehouse' ? 12 : lm.kind === 'shop' ? 14 : 16;
+    const lmColor = lm.kind === 'bank' ? 0xd8c98a : lm.kind === 'police' ? 0x3a5a7a : lm.kind === 'safehouse' ? 0x58c96b : lm.kind === 'shop' ? 0xffb02e : 0x8a6f5c;
+    buildings.push({ x, z, w: 26, d: 26, h: lmH, color: lmColor, id: `lm-${lm.id}`, landmark: lm.id });
   }
 
   // Health + weapon pickups scattered on sidewalks.

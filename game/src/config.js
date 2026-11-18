@@ -33,6 +33,68 @@ export const CAR = {
   width: 2.0,
 };
 
+// NOS boost (v2): hold Shift in a car to burn NOS. Top speed rises ~45% while the
+// tank lasts; drifting (Space handbrake) refills a little of it. The tank refills
+// slowly on its own and fully at the safehouse garage.
+export const NOS = {
+  max: 100,
+  drainPerSec: 42,
+  regenPerSec: 3.5,
+  driftRefundPerSec: 9,
+  boostMult: 1.45,
+  refillPrice: 100,
+};
+
+// Police helicopter (v2): appears at 4-5 stars, hovers above the player with a
+// spotlight, blocks wanted decay while overhead, and nudges ground units in.
+export const HELI = {
+  minWanted: 4,
+  hoverHeight: 34,
+  followSpeed: 26,
+  spotRadius: 14,
+  rotorHz: 11,
+};
+
+export const WEAPONS = {
+  pistol: { name: 'PISTOL', damage: 34, cooldown: 0.3, price: 0 },
+  smg: { name: 'SMG', damage: 18, cooldown: 0.09, price: 0 },
+  shotgun: { name: 'SHOTGUN', damage: 16, pellets: 5, cooldown: 0.85, price: 600, ammo: 24 },
+};
+
+export const SHOP = {
+  armorPrice: 200,
+  smgAmmoPrice: 150,
+  smgAmmoAmount: 60,
+  nosPrice: 100,
+  healthPrice: 120,
+};
+
+// Solmar Bay has 12 named districts (v2): the HUD names the one you are in, and the
+// race / smuggle missions route through them. Grid is 8x8 blocks; districts are
+// 2x2-block quarters plus the marina / old town corners.
+export const DISTRICTS = [
+  { name: 'Delia Row', x0: -232, z0: -232, x1: -58, z1: -58 },
+  { name: 'Fishmarket', x0: -58, z0: -232, x1: 116, z1: -58 },
+  { name: 'North Docks', x0: 116, z0: -232, x1: 232, z1: -58 },
+  { name: 'Old Town', x0: -232, z0: -58, x1: -58, z1: 116 },
+  { name: 'Civic Center', x0: -58, z0: -58, x1: 116, z1: 116 },
+  { name: 'Bayfront', x0: 116, z0: -58, x1: 232, z1: 116 },
+  { name: 'St. Anselm', x0: -232, z0: 116, x1: -58, z1: 232 },
+  { name: 'Palm Court', x0: -58, z0: 116, x1: 116, z1: 232 },
+  { name: 'Marina Bay', x0: 116, z0: 116, x1: 232, z1: 232 },
+  { name: 'Sunset Strip', x0: -232, z0: -58, x1: -116, z1: 0 },
+  { name: 'Harbor Lights', x0: 0, z0: -232, x1: 116, z1: -116 },
+  { name: 'Cayo Verde', x0: 116, z0: 0, x1: 232, z1: 116 },
+];
+
+// Car radio (v2): three switchable synth stations, Q cycles. No audio files — the
+// sound module synthesises each station's loop live.
+export const RADIO = [
+  { name: 'SOLMAR FM 88.5', tag: 'sunset pop', tempo: 112, scale: [0, 2, 4, 7, 9], root: 220 },
+  { name: 'BAY 101 BASS', tag: 'night drive', tempo: 96, scale: [0, 3, 5, 7, 10], root: 110 },
+  { name: 'PALM AM 1420', tag: 'old gold', tempo: 132, scale: [0, 4, 5, 7, 11], root: 262 },
+];
+
 export const WANTED = {
   max: 5,
   decayDelay: 18,     // seconds without a crime before stars start falling
@@ -57,6 +119,15 @@ export const MISSIONS = [
   { id: 'vault', name: '5 · The Vault Run', pay: 2000,
     brief: 'The Solmar Trust vault. In, out, gone — then the boat at the marina.',
     detail: 'Reach the bank, hold E at the vault for 3 seconds, then escape to the marina with 4 stars.' },
+  { id: 'smuggle', name: '6 · Harbor Lights', pay: 1200,
+    brief: 'A hot car full of Delia’s cargo. Deliver it to the marina — quietly.',
+    detail: 'Steal the marked car at the docks, then drive it to the marina without wrecking it. Damage over 60% voids the pay.' },
+  { id: 'race', name: '7 · Bayfront Grand Prix', pay: 1500,
+    brief: 'An illegal street race across all twelve districts. NOS is legal here.',
+    detail: 'Hit all 6 race gates in order before the 110-second clock runs out. Shift for NOS, Space to drift the corners.' },
+  { id: 'finale', name: '8 · The Delia Gambit', pay: 3000,
+    brief: 'One last job: rob the SBPD evidence vault, then lose the helicopter.',
+    detail: 'Reach SBPD Central, hold E for 4 seconds, then survive 75 seconds at 5 stars with the helicopter on you — then reach the safehouse.' },
 ];
 
 export const PALETTE = {
