@@ -31,7 +31,7 @@ const random = createRandom(seed);
 const city = createCity(random);
 const sound = createSound();
 const hud = createHud();
-const renderer = createRenderer(canvas, city);
+const renderer = createRenderer(canvas, city, random);
 const input = createInput(canvas);
 
 function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -56,7 +56,7 @@ const G = {
   wanted: 0, lastCrimeT: -999, decayT: 0, bustT: 0,
   day: 1, clockMin: 8 * 60, time: 0,
   screen: 'title', freeRoam: false, storyDone: false,
-  fireCooldown: 0, taxiPed: null, taxiCooldown: 8, gunfire: null,
+  fireCooldown: 0, taxiPed: null, taxiCooldown: 8, gunfire: null, hitstopT: 0,
   gullKills: 0, holdingE: false, shotCam: null,
   heli: null, radioStation: 0, district: 'Solmar Bay', nos: 100,
   smuggleCar: null, driftT: 0,
@@ -231,6 +231,9 @@ function damagePlayer(amount) {
   const soaked = Math.min(p.armor, amount);
   p.armor -= soaked;
   p.health -= (amount - soaked);
+  // Getting hit shakes the camera (trauma 0.35) so damage reads as impact,
+  // not bookkeeping.
+  renderer.addTrauma(0.35);
 }
 
 function aimDir() { return { x: Math.sin(G.player.camYaw), z: Math.cos(G.player.camYaw) }; }
@@ -352,6 +355,7 @@ function finishMission(ev) {
   hud.toast(`JOB DONE — +$${ev.pay}. ${ev.message}`, 4500);
   sound.missionDone();
   sound.cash();
+  renderer.addTrauma(0.3);
   announce(`Mission complete. Earned $${ev.pay}. ${ev.message}`);
   saveGame(true);
   if (G.mission.index >= 10 && !G.storyDone) {
@@ -389,6 +393,7 @@ function finishRace(ev) {
   hud.toast(`RACE WON — +$${ev.pay}${ev.bonus ? ' (beat both rivals, 1.5x!)' : ''} in ${Math.round(ev.time)}s.`, 4500);
   sound.raceWin();
   sound.cash();
+  renderer.punchFov(4);
   announce(`Race won. Earned $${ev.pay}.`);
   saveGame(true);
 }
@@ -602,7 +607,7 @@ function tickDriving(dt, mv, look, actions) {
   const wasBoosting = car.nosActive;
   const wasLocked = car.nosLockout;
   stepDrivenCar(car, mv.y, -mv.x, input.driftHeld(), dt, city, input.nosHeld());
-  if (car.nosActive && !wasBoosting) sound.nos();
+  if (car.nosActive && !wasBoosting) { sound.nos(); renderer.punchFov(6); }
   if (car.nosLockout > 0 && wasLocked <= 0) {
     sound.nosOverheat();
     hud.toast('NOS OVERHEAT — lift off and let it cool.', 2600);
@@ -674,6 +679,7 @@ function tickWorld(dt) {
       if (pk.kind === 'health') { p.health = Math.min(100, p.health + 40); hud.toast('Health +40'); }
       else { p.weapon = 'smg'; p.smgAmmo += 60; hud.toast('SMG picked up — 60 rounds'); }
       sound.pickup();
+      renderer.addTrauma(0.15);
     }
   }
 }
@@ -756,6 +762,8 @@ function tickHeat(dt) {
     const res = stepPolice(car, p.x, p.z, p.inCar, dt, city);
     if (res.damage > 0) {
       damagePlayer(res.damage);
+      // A police ram is heavy contact: brief hitstop so the impact lands.
+      G.hitstopT = Math.max(G.hitstopT, 0.07);
       if (!p.inCar) hud.toast('Police ram!');
     }
   }
@@ -923,11 +931,18 @@ function runGame() {
   let prev = performance.now();
   function frame(now) {
     requestAnimationFrame(frame);
-    acc += Math.min((now - prev) / 1000, MAX_FRAME);
+    const realDt = Math.min((now - prev) / 1000, MAX_FRAME);
     prev = now;
-    while (acc >= STEP) {
-      step(STEP);
-      acc -= STEP;
+    // Hitstop freezes the simulation (not the render) for a beat so heavy
+    // contact reads as weight; camera, shake and HUD stay live.
+    if (G.hitstopT > 0) {
+      G.hitstopT -= realDt;
+    } else {
+      acc += realDt;
+      while (acc >= STEP) {
+        step(STEP);
+        acc -= STEP;
+      }
     }
     // Title screen: slow orbit over the city.
     if (G.screen === 'title') {
