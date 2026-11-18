@@ -3,6 +3,8 @@
 // enforcers (mission 3) and on-foot cops stand their ground, chase the player and punch/shoot.
 // v2: a shopkeeper stands at Solmar Arms & Ammo and a mechanic at the safehouse —
 // both stay put, never flee, and never count as targets for missions.
+// v3: a croupier stands at the Crown Casino (job 10's set dressing — same stationary
+// keeper behaviour, gold jacket) and gulls now also guard the dock crates in job 9.
 import { CITY } from './config.js';
 import { collideBuildings, nearestRoadPoint, randomRoadPoint } from './world.js';
 import { pick, range } from './random.js';
@@ -46,8 +48,8 @@ export function stepPeds(peds, dt, city, player, gunfire, random) {
     const dx = player.x - ped.x, dz = player.z - ped.z;
     const dist = Math.hypot(dx, dz);
 
-    // v2 keepers never move, never flee, never fight — they run the shop/safehouse.
-    if (ped.kind === 'shopkeeper' || ped.kind === 'mechanic') {
+    // Keepers never move, never flee, never fight — they run the shop/safehouse/casino.
+    if (ped.kind === 'shopkeeper' || ped.kind === 'mechanic' || ped.kind === 'croupier') {
       ped.angle = Math.PI;
       continue;
     }
@@ -130,13 +132,14 @@ export function spawnGulls(random, x, z, count) {
   return gulls;
 }
 
-// v2: stationary shopkeeper / mechanic peds. They stand at their landmark's
+// Stationary shopkeeper / mechanic / croupier peds. They stand at their landmark's
 // approach point, face the street, and never walk off.
 export function spawnKeeper(kind, x, z) {
+  const colors = { shopkeeper: 0xffb02e, mechanic: 0x58c96b, croupier: 0xc9a227 };
   return {
     x, z, angle: Math.PI, speed: 0, hp: 100,
-    kind, // 'shopkeeper' | 'mechanic'
-    color: kind === 'shopkeeper' ? 0xffb02e : 0x58c96b,
+    kind, // 'shopkeeper' | 'mechanic' | 'croupier'
+    color: colors[kind] || 0xffb02e,
     state: 'stand', stateT: 0, targetX: x, targetZ: z,
     fleeX: 0, fleeZ: 0, attackCooldown: 0, shootCooldown: 0,
     mesh: null, alive: true, paid: false, taxi: false,

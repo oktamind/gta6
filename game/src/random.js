@@ -18,7 +18,7 @@ export function range(random, min, max) {
   return min + random() * (max - min);
 }
 
-// v2 helpers, all seeded through the same RNG so screenshots stay deterministic.
+// Seeded helpers, all through the same RNG so screenshots stay deterministic.
 export function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -39,4 +39,14 @@ export function choice(random, array) {
 // Pick `n` distinct items from an array (Fisher-Yates prefix).
 export function sample(random, array, n) {
   return shuffle(random, array).slice(0, Math.min(n, array.length));
+}
+
+// v3: linear interpolation and a seeded coin flip — small helpers the race rival
+// spacing and the HUD smoothing use instead of inlining the same math twice.
+export function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+export function chance(random, p) {
+  return random() < p;
 }

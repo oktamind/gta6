@@ -1,15 +1,18 @@
-// Solmar Heist — boot and the one loop.
+// Solmar Heist v3 — boot and the one loop.
 // Screens: title, play, paused, end (busted / wasted / story complete). The world advances in
 // fixed 1/60 s steps; the renderer paints what is there. ?seed=N fixes the city; ?shot=start|
 // drive|chase|heist (with &seed=N) stages that scene instead of running the loop, paints it
 // twice and sets window.__shotReady for a screenshot.
-import { STEP, SAVE_KEY, PLAYER, CAR, WANTED, MISSIONS, CITY, RADIO, SHOP, HELI } from './config.js';
+// v3: ten story jobs, three street-race circuits with rivals, a rifle, a fourth radio
+// station, fourteen districts, and a helicopter that orbits and calls in backup.
+import { STEP, SAVE_KEY, PLAYER, CAR, WANTED, MISSIONS, CITY, RADIO, SHOP, HELI, WEAPONS, RACE_EVENTS } from './config.js';
 import { createRandom } from './random.js';
-import { createInput, ACTION_ENTER, ACTION_PAUSE, ACTION_SHOOT, ACTION_JUMP, ACTION_HONK, ACTION_RELOAD, ACTION_INTERACT, ACTION_RADIO, ACTION_SHOP1, ACTION_SHOP2, ACTION_SHOP3, ACTION_SHOP4 } from './input.js';
+import { createInput, ACTION_ENTER, ACTION_PAUSE, ACTION_SHOOT, ACTION_JUMP, ACTION_HONK, ACTION_RELOAD, ACTION_INTERACT, ACTION_RADIO, ACTION_SHOP1, ACTION_SHOP2, ACTION_SHOP3, ACTION_SHOP4, ACTION_SHOP5 } from './input.js';
 import { createCity, collideBuildings, nearestRoadPoint, landmarkApproach, districtAt } from './world.js';
 import { makeCar, stepDrivenCar, createTraffic, stepTraffic, createPoliceCar, stepPolice, nearestParkedCar, makeHeli, stepHeli } from './vehicles.js';
 import { createPeds, stepPeds, damagePedsAt, spawnGulls, spawnCop, spawnKeeper } from './peds.js';
 import { createMissionState, startMission, stepMission, objectiveText } from './missions.js';
+import { createRaceState, startRace, stepRace, raceEventAt, stepRival, raceObjectiveText } from './races.js';
 import { createSound } from './sound.js';
 import { createHud } from './hud.js';
 import { createRenderer } from './render.js';
@@ -40,10 +43,16 @@ const G = {
     health: PLAYER.health, cash: 150, weapon: 'pistol', smgAmmo: 0,
     // v2: armor absorbs damage first, shotgun is the third weapon.
     armor: 0, shotgunAmmo: 0,
+    // v3: the rifle is the fourth weapon, bought at the shop.
+    rifleAmmo: 0,
     inCar: false, car: null, moving: false,
   },
   parked: [], traffic: [], police: [], peds: [],
   mission: createMissionState(),
+  // v3: street races — state machine in races.js, rivals rendered as cars.
+  race: createRaceState(),
+  raceRivals: [],
+  raceStarts: RACE_EVENTS,
   objective: { title: 'FREE ROAM', text: 'Explore Solmar Bay.', sub: '' },
   wanted: 0, lastCrimeT: -999, decayT: 0, bustT: 0,
   day: 1, clockMin: 8 * 60, time: 0,
@@ -53,7 +62,7 @@ const G = {
   // v2: helicopter (4-5 stars), radio station index, current district, smuggle car.
   heli: null, radioStation: 0, district: 'Solmar Bay', nos: 100,
   smuggleCar: null, driftT: 0,
-  stats: { carsStolen: 0, shotsFired: 0, pedsDown: 0, missionsDone: 0, fares: 0, earned: 0 },
+  stats: { carsStolen: 0, shotsFired: 0, pedsDown: 0, missionsDone: 0, fares: 0, earned: 0, racesWon: 0 },
 };
 
 // Parked cars from the city's parking spots.
@@ -63,12 +72,15 @@ for (const spot of city.parkSpots) {
 G.traffic = createTraffic(random, city, 14);
 G.peds = createPeds(random, city, 26);
 // v2 keepers: the shopkeeper at Solmar Arms and the mechanic at the safehouse.
-// (After createPeds — that call replaces G.peds, so keepers go in after it.)
+// v3 keeper: the croupier at the Crown Casino. (After createPeds — that call replaces
+// G.peds, so keepers go in after it.)
 {
   const shopAt = landmarkApproach(city, 'shop');
   const safeAt = landmarkApproach(city, 'safehouse');
+  const casinoAt = landmarkApproach(city, 'casino');
   G.peds.push(spawnKeeper('shopkeeper', shopAt.x, shopAt.z));
   G.peds.push(spawnKeeper('mechanic', safeAt.x, safeAt.z));
+  G.peds.push(spawnKeeper('croupier', casinoAt.x, casinoAt.z));
 }
 
 function announce(msg) { statusEl.textContent = msg; }
@@ -87,7 +99,8 @@ function saveGame(silent) {
     const data = {
       cash: p.cash, health: p.health, x: p.x, z: p.z, angle: p.angle,
       weapon: p.weapon, smgAmmo: p.smgAmmo,
-      armor: p.armor, shotgunAmmo: p.shotgunAmmo, radioStation: G.radioStation,
+      armor: p.armor, shotgunAmmo: p.shotgunAmmo, rifleAmmo: p.rifleAmmo,
+      radioStation: G.radioStation, raceBest: G.race.best,
       missionIndex: G.mission.index, missionDone: G.mission.done,
       day: G.day, clockMin: G.clockMin, savedAt: Date.now(),
     };
@@ -111,10 +124,12 @@ function applySave(data) {
   p.x = data.x; p.z = data.z; p.angle = data.angle || 0;
   p.weapon = data.weapon || 'pistol'; p.smgAmmo = data.smgAmmo || 0;
   p.armor = data.armor || 0; p.shotgunAmmo = data.shotgunAmmo || 0;
+  p.rifleAmmo = data.rifleAmmo || 0;
   G.radioStation = data.radioStation || 0;
+  G.race.best = data.raceBest || {};
   G.mission.index = data.missionIndex || 0;
-  // v1 saves carry 5 done-flags; pad to 8 so the new jobs still offer.
-  G.mission.done = (data.missionDone || []).concat([false, false, false, false, false, false, false, false]).slice(0, 8);
+  // v1 saves carry 5 done-flags, v2 saves 8; pad to 10 so the new jobs still offer.
+  G.mission.done = (data.missionDone || []).concat([false, false, false, false, false, false, false, false, false, false]).slice(0, 10);
   G.day = data.day || 1; G.clockMin = data.clockMin || 480;
 }
 
@@ -138,11 +153,13 @@ function refreshTitle() {
 function newGame(freeRoam, fromSave) {
   const p = G.player;
   p.health = PLAYER.health; p.inCar = false; p.car = null;
-  p.weapon = 'pistol'; p.smgAmmo = 0; p.armor = 0; p.shotgunAmmo = 0;
+  p.weapon = 'pistol'; p.smgAmmo = 0; p.armor = 0; p.shotgunAmmo = 0; p.rifleAmmo = 0;
   G.wanted = 0; G.bustT = 0; G.gullKills = 0; G.heli = null; G.smuggleCar = null;
   G.mission = createMissionState();
+  G.race = createRaceState();
+  G.raceRivals = [];
   G.freeRoam = freeRoam;
-  if (freeRoam) { G.mission.index = 8; G.mission.done = [true, true, true, true, true, true, true, true]; }
+  if (freeRoam) { G.mission.index = 10; G.mission.done = [true, true, true, true, true, true, true, true, true, true]; }
   if (fromSave) applySave(fromSave);
   else if (!freeRoam) { p.cash = 150; const g = landmarkApproach(city, 'garage'); p.x = g.x; p.z = g.z; }
   showScreen('play');
@@ -201,15 +218,16 @@ function damagePlayer(amount) {
 function shoot() {
   const p = G.player;
   if (G.fireCooldown > 0 || p.inCar) return;
-  const isSmg = p.weapon === 'smg';
-  const isShotgun = p.weapon === 'shotgun';
-  if (isSmg && p.smgAmmo <= 0) { p.weapon = 'pistol'; hud.toast('SMG dry — back to the pistol.'); return; }
-  if (isShotgun && p.shotgunAmmo <= 0) { p.weapon = 'pistol'; hud.toast('Shotgun dry — back to the pistol.'); return; }
-  G.fireCooldown = isSmg ? 0.09 : isShotgun ? 0.85 : 0.3;
-  if (isSmg) p.smgAmmo -= 1;
-  if (isShotgun) p.shotgunAmmo -= 1;
+  const w = WEAPONS[p.weapon] || WEAPONS.pistol;
+  if (p.weapon === 'smg' && p.smgAmmo <= 0) { p.weapon = 'pistol'; hud.toast('SMG dry — back to the pistol.'); return; }
+  if (p.weapon === 'shotgun' && p.shotgunAmmo <= 0) { p.weapon = 'pistol'; hud.toast('Shotgun dry — back to the pistol.'); return; }
+  if (p.weapon === 'rifle' && p.rifleAmmo <= 0) { p.weapon = 'pistol'; hud.toast('Rifle dry — back to the pistol.'); return; }
+  G.fireCooldown = w.cooldown;
+  if (p.weapon === 'smg') p.smgAmmo -= 1;
+  if (p.weapon === 'shotgun') p.shotgunAmmo -= 1;
+  if (p.weapon === 'rifle') p.rifleAmmo -= 1;
   G.stats.shotsFired += 1;
-  sound.shoot(isSmg);
+  sound.shoot(p.weapon);
   const dir = { x: Math.sin(p.camYaw), z: Math.cos(p.camYaw) };
   const from = { x: p.x, y: 1.5, z: p.z };
   // Melee first: anyone right in front of you gets punched.
@@ -219,8 +237,9 @@ function shoot() {
     onPedDown(close, true);
     return;
   }
-  // Hitscan: nearest ped inside a narrow cone, out to 46 m.
-  let best = null, bestD = 46;
+  // Hitscan: nearest ped inside a narrow cone. The rifle reaches 80 m; the rest 46 m.
+  const range = p.weapon === 'rifle' ? 80 : 46;
+  let best = null, bestD = range;
   for (const ped of G.peds) {
     if (!ped.alive) continue;
     const dx = ped.x - p.x, dz = ped.z - p.z;
@@ -231,11 +250,11 @@ function shoot() {
   }
   const to = best
     ? { x: best.x, y: 1.2, z: best.z }
-    : { x: p.x + dir.x * 46, y: 1.5, z: p.z + dir.z * 46 };
+    : { x: p.x + dir.x * range, y: 1.5, z: p.z + dir.z * range };
   renderer.showTracer(from, to, G.time + 0.08);
   G.gunfire = { x: p.x, z: p.z };
   if (best) {
-    if (isShotgun) {
+    if (p.weapon === 'shotgun') {
       // Shotgun: a 5-pellet spread hits everything in a wide cone out to 20 m.
       for (const ped of G.peds) {
         if (!ped.alive) continue;
@@ -249,7 +268,7 @@ function shoot() {
         }
       }
     } else {
-      best.hp -= isSmg ? 18 : 34;
+      best.hp -= w.damage;
       if (best.hp <= 0) { best.alive = false; onPedDown(best, false); }
     }
   }
@@ -269,7 +288,7 @@ function onPedDown(ped, melee) {
 
 // ---- Missions ----
 function tryStartMission() {
-  if (G.mission.active || G.mission.index >= 8 || G.freeRoam) return false;
+  if (G.mission.active || G.mission.index >= 10 || G.freeRoam) return false;
   const g = landmarkApproach(city, 'garage');
   const nearGarage = Math.hypot(G.player.x - g.x, G.player.z - g.z) < 12;
   if (!nearGarage) return false;
@@ -303,10 +322,39 @@ function finishMission(ev) {
   sound.cash();
   announce(`Mission complete. Earned $${ev.pay}. ${ev.message}`);
   saveGame(true);
-  if (G.mission.index >= 8 && !G.storyDone) {
+  if (G.mission.index >= 10 && !G.storyDone) {
     G.storyDone = true;
-    endScreen('story', 'Solmar Bay is yours', 'All eight jobs done. Delia paid in full, the boat is waiting, and the city finally knows your name. Free roam continues — fares, races, chaos, whatever you like.');
+    endScreen('story', 'Solmar Bay is yours', 'All ten jobs done. Delia paid in full, the boat is waiting, and the city finally knows your name. Free roam continues — fares, races, chaos, whatever you like.');
   }
+}
+
+// ---- Street races (v3) ----
+function tryStartRace() {
+  const p = G.player;
+  if (G.mission.active || G.race.active || !p.inCar) return false;
+  const ev = raceEventAt(p.x, p.z);
+  if (!ev) return false;
+  G.raceRivals = startRace(G.race, ev, random);
+  hud.toast(`${ev.name} — ${ev.gates.length} gates, ${ev.time}s. Beat both rivals for 1.5x ($${Math.round(ev.prize * 1.5)}).`, 4200);
+  announce(`Street race started: ${ev.name}.`);
+  sound.raceBeep();
+  return true;
+}
+
+function finishRace(ev) {
+  const p = G.player;
+  p.cash += ev.pay;
+  G.stats.earned += ev.pay;
+  G.stats.racesWon += 1;
+  // Rival meshes are pooled in the renderer — pull them out of the scene before
+  // dropping the list, or the rivals freeze in place at their last position.
+  for (const rival of G.raceRivals) renderer.removeCar(rival);
+  G.raceRivals = [];
+  hud.toast(`RACE WON — +$${ev.pay}${ev.bonus ? ' (beat both rivals, 1.5x!)' : ''} in ${Math.round(ev.time)}s.`, 4500);
+  sound.raceWin();
+  sound.cash();
+  announce(`Race won. Earned $${ev.pay}.`);
+  saveGame(true);
 }
 
 // ---- End screens ----
@@ -315,7 +363,7 @@ function endScreen(kind, title, text) {
   document.getElementById('end-title').textContent = title;
   document.getElementById('end-text').textContent = text;
   document.getElementById('end-stats').innerHTML =
-    `Cash $${p.cash.toLocaleString('en-US')} · Jobs done ${G.stats.missionsDone}/8 · Cars stolen ${G.stats.carsStolen}<br>` +
+    `Cash $${p.cash.toLocaleString('en-US')} · Jobs done ${G.stats.missionsDone}/10 · Races won ${G.stats.racesWon} · Cars stolen ${G.stats.carsStolen}<br>` +
     `Fares ${G.stats.fares} · Earned $${G.stats.earned.toLocaleString('en-US')} · Day ${G.day}`;
   showScreen('end');
   sound.busted();
@@ -331,6 +379,7 @@ function respawn() {
   p.health = PLAYER.health;
   G.wanted = 0;
   G.heli = null;
+  for (const car of G.police) renderer.removeCar(car);
   G.police = [];
   for (const ped of G.peds) if (ped.kind === 'cop') ped.alive = false;
   showScreen('play');
@@ -361,7 +410,7 @@ function startTaxi() {
   hud.toast(`Fare accepted — $${fare}. Get them there in 55 seconds.`);
 }
 
-// ---- Shop & safehouse (v2) ----
+// ---- Shop & safehouse (v2; v3 adds the rifle on slot 5) ----
 function nearShop() {
   const s = landmarkApproach(city, 'shop');
   return Math.hypot(G.player.x - s.x, G.player.z - s.z) < 12;
@@ -390,14 +439,24 @@ function buyFromShop(slot) {
     hud.toast('NOS tank refilled.'); sound.till();
   } else if (slot === 4) {
     if (p.weapon === 'shotgun') {
-      // Repeat purchase: a box of 12 shells for $120.
-      if (p.cash < 120) { hud.toast('Shotgun shells (12) are $120.'); return; }
-      p.cash -= 120; p.shotgunAmmo += 12;
-      hud.toast('Shotgun shells +12.'); sound.till(); return;
+      // Repeat purchase: a box of shells.
+      if (p.cash < SHOP.shotgunShellPrice) { hud.toast(`Shotgun shells (${SHOP.shotgunShellAmount}) are $${SHOP.shotgunShellPrice}.`); return; }
+      p.cash -= SHOP.shotgunShellPrice; p.shotgunAmmo += SHOP.shotgunShellAmount;
+      hud.toast(`Shotgun shells +${SHOP.shotgunShellAmount}.`); sound.till(); return;
     }
-    if (p.cash < 600) { hud.toast('Shotgun is $600 — come back richer.'); return; }
-    p.cash -= 600; p.weapon = 'shotgun'; p.shotgunAmmo = 24;
+    if (p.cash < WEAPONS.shotgun.price) { hud.toast('Shotgun is $600 — come back richer.'); return; }
+    p.cash -= WEAPONS.shotgun.price; p.weapon = 'shotgun'; p.shotgunAmmo = WEAPONS.shotgun.ammo;
     hud.toast('Shotgun bought — 24 shells, wide spread.'); sound.till();
+  } else if (slot === 5) {
+    if (p.weapon === 'rifle') {
+      // Repeat purchase: a box of 20 rifle rounds.
+      if (p.cash < SHOP.rifleAmmoPrice) { hud.toast(`Rifle rounds (${SHOP.rifleAmmoAmount}) are $${SHOP.rifleAmmoPrice}.`); return; }
+      p.cash -= SHOP.rifleAmmoPrice; p.rifleAmmo += SHOP.rifleAmmoAmount;
+      hud.toast(`Rifle rounds +${SHOP.rifleAmmoAmount}.`); sound.till(); return;
+    }
+    if (p.cash < WEAPONS.rifle.price) { hud.toast('Rifle is $900 — come back richer.'); return; }
+    p.cash -= WEAPONS.rifle.price; p.weapon = 'rifle'; p.rifleAmmo = WEAPONS.rifle.ammo;
+    hud.toast('Rifle bought — 20 rounds, 80 m reach, heavy hits.'); sound.till();
   }
 }
 
@@ -428,7 +487,7 @@ function step(dt) {
 
   const actions = input.takeActions();
   if (actions & ACTION_PAUSE) {
-    if (G.screen === 'play') { showScreen('paused'); document.getElementById('pause-stats').innerHTML = `Cash $${p.cash} · Jobs ${G.stats.missionsDone}/8 · Day ${G.day}`; }
+    if (G.screen === 'play') { showScreen('paused'); document.getElementById('pause-stats').innerHTML = `Cash $${p.cash} · Jobs ${G.stats.missionsDone}/10 · Races won ${G.stats.racesWon} · Day ${G.day}`; }
     else if (G.screen === 'paused') showScreen('play');
   }
   if (G.screen !== 'play') return;
@@ -442,11 +501,12 @@ function step(dt) {
     G.radioStation = RADIO.indexOf(st);
     hud.toast(`Radio: ${st.name} — ${st.tag}`, 3000);
   }
-  // v2 shop: digits 1-4 buy at Solmar Arms (on foot, near the shop).
+  // v2 shop: digits 1-4 buy at Solmar Arms (on foot, near the shop); v3 digit 5 is the rifle.
   if (actions & ACTION_SHOP1) buyFromShop(1);
   if (actions & ACTION_SHOP2) buyFromShop(2);
   if (actions & ACTION_SHOP3) buyFromShop(3);
   if (actions & ACTION_SHOP4) buyFromShop(4);
+  if (actions & ACTION_SHOP5) buyFromShop(5);
 
   const mv = input.move();
 
@@ -458,8 +518,11 @@ function step(dt) {
     const nosHeld = input.nosHeld();
     const driftHeld = input.driftHeld();
     const wasNos = car.nosActive;
+    const wasLockout = car.nosLockout;
     stepDrivenCar(car, drive, steer, driftHeld, dt, city, nosHeld);
     if (car.nosActive && !wasNos) sound.nos();
+    // v3: the overheat clunk fires once, the moment the kit locks out.
+    if (car.nosLockout > 0 && wasLockout <= 0) { sound.nosOverheat(); hud.toast('NOS OVERHEAT — lift off and let it cool.', 2600); }
     if (car.drifting && G.time - G.driftT > 0.5) { G.driftT = G.time; sound.drift(); }
     // v2 mission 6: bumping things in the hot car damages the cargo.
     if (G.mission.active && G.mission.index === 5 && G.smuggleCar === car && car.hp < 100) {
@@ -471,7 +534,10 @@ function step(dt) {
     // Camera follows behind the car unless the player drags it.
     if (Math.abs(look.dx) < 1) p.camYaw += (car.angle - p.camYaw) * Math.min(1, dt * 1.5);
     sound.engine(Math.abs(car.speed) / CAR.maxSpeed, true);
-    if (actions & ACTION_ENTER) exitCar();
+    if (actions & ACTION_ENTER) {
+      // v3: E in a car near a race flag starts that street race; otherwise exit.
+      if (!tryStartRace()) exitCar();
+    }
   } else {
     sound.engine(0, false);
     const speed = mv.sprint ? PLAYER.sprintSpeed : PLAYER.walkSpeed;
@@ -549,12 +615,34 @@ function step(dt) {
     maybeSpawnTaxi();
   }
 
+  // Street races (v3): gates, timer, rivals.
+  if (G.race.active) {
+    const rev = stepRace(G.race, dt, { x: p.x, z: p.z, inCar: p.inCar });
+    const gates = G.race.event ? G.race.event.gates : [];
+    const elapsed = G.race.event ? G.race.event.time - G.race.timer : 0;
+    for (const rival of G.raceRivals) {
+      stepRival(rival, gates[rival.gateIndex], dt, {
+        collide: (pp, rr) => collideBuildings(city, pp, rr),
+        gatesLen: gates.length,
+        elapsed,
+      });
+    }
+    if (rev.message) hud.toast(rev.message, 3000);
+    if (rev.completed) finishRace(rev);
+    else if (rev.failed) {
+      hud.toast(`RACE LOST — ${rev.reason}`, 4200);
+      for (const rival of G.raceRivals) renderer.removeCar(rival);
+      G.raceRivals = [];
+    }
+  }
+
   // Missions.
   if (G.mission.active) {
     const ev = stepMission(G.mission, dt, {
       x: p.x, z: p.z, inCar: p.inCar, gullKills: G.gullKills,
       holdingE: G.holdingE, marina: landmarkApproach(city, 'marina'),
       safehouse: landmarkApproach(city, 'safehouse'),
+      garage: landmarkApproach(city, 'garage'),
       inSmuggleCar: !!(p.inCar && p.car && G.smuggleCar === p.car),
     });
     if (ev.setWanted) addWanted(ev.setWanted - G.wanted, 'the heat is on');
@@ -562,7 +650,8 @@ function step(dt) {
     if (ev.completed) finishMission(ev);
     else if (ev.failed) { hud.toast(`JOB FAILED — ${ev.reason}`, 4200); G.mission.marker = null; }
   }
-  G.objective = objectiveText(G.mission);
+  // v3: a race in progress owns the objective line; otherwise the mission does.
+  G.objective = raceObjectiveText(G.race) || objectiveText(G.mission);
 
   // Wanted: police presence scales with stars.
   const wantCars = G.wanted > 0 ? Math.min(3, G.wanted) : 0;
@@ -572,6 +661,9 @@ function step(dt) {
     const cops = G.peds.filter((q) => q.alive && q.kind === 'cop').length;
     for (let i = cops; i < wantCops; i += 1) G.peds.push(spawnCop(random, city, p));
   } else {
+    // Heat gone: pull the police cars out of the scene too, not just the list —
+    // the renderer pools meshes per car, so a dropped list leaves frozen cruisers.
+    for (const car of G.police) renderer.removeCar(car);
     G.police = [];
     for (const q of G.peds) if (q.kind === 'cop') q.alive = false;
   }
@@ -582,7 +674,8 @@ function step(dt) {
       if (!p.inCar) hud.toast('Police ram!');
     }
   }
-  // v2 helicopter: spawns at 4-5 stars, follows overhead, blocks heat decay.
+  // v3 helicopter: spawns at 4-5 stars, orbits overhead, blocks heat decay, and at
+  // 5 stars calls in a fresh ground unit every HELI.callSec seconds.
   if (G.wanted >= HELI.minWanted && !G.heli) {
     G.heli = makeHeli(p.x + 24, p.z - 24);
     hud.toast('SBPD air unit overhead — the helicopter is on you!', 4200);
@@ -590,7 +683,12 @@ function step(dt) {
     G.heli = null;
   }
   if (G.heli) {
-    stepHeli(G.heli, p.x, p.z, dt);
+    stepHeli(G.heli, p.x, p.z, dt, G.wanted, p.inCar && p.car ? p.car.angle : p.angle);
+    if (G.heli.callReinforcements) {
+      G.heli.callReinforcements = false;
+      G.police.push(createPoliceCar(random, city, p.x, p.z));
+      hud.toast('Air unit called in backup — another SBPD car is coming.', 3800);
+    }
     sound.heli(true, dt);
   } else {
     sound.heli(false, dt);
@@ -637,14 +735,19 @@ function step(dt) {
     const g = landmarkApproach(city, 'garage');
     const nearGarage = Math.hypot(p.x - g.x, p.z - g.z) < 12;
     if (nearCar) hud.setHint('E — steal this car');
-    else if (nearShop()) hud.setHint('Shop: 1 armor $200 · 2 SMG ammo $150 · 3 NOS $100 · 4 shotgun $600');
+    else if (nearShop()) hud.setHint('Shop: 1 armor $200 · 2 SMG ammo $150 · 3 NOS $100 · 4 shotgun $600 · 5 rifle $900');
     else if (nearSafehouse()) hud.setHint('E — safehouse: heal, repair, refill NOS, save');
-    else if (nearGarage && !G.mission.active && G.mission.index < 8 && !G.freeRoam) hud.setHint(`E — start job: ${MISSIONS[G.mission.index].name}`);
+    else if (nearGarage && !G.mission.active && G.mission.index < 10 && !G.freeRoam) hud.setHint(`E — start job: ${MISSIONS[G.mission.index].name}`);
     else if (G.mission.active && G.mission.index === 4 && G.mission.step === 1) hud.setHint('Hold E at the vault marker');
     else if (G.mission.active && G.mission.index === 7 && G.mission.step === 1) hud.setHint('Hold E at the evidence vault marker');
+    else if (G.mission.active && G.mission.index === 8 && G.mission.step === 1) hud.setHint('Hold E at the crates to load them');
+    else if (G.mission.active && G.mission.index === 9 && G.mission.step === 1) hud.setHint('Hold E at the counting room marker');
     else hud.setHint('WASD move · E enter car · Click shoot · Q radio · P pause');
   } else {
-    hud.setHint(G.taxiPed && Math.hypot(p.x - G.taxiPed.x, p.z - G.taxiPed.z) < 6 ? 'E — pick up the fare' : 'WASD drive · Shift NOS · Space drift · E exit car · H honk · Q radio');
+    const raceEv = raceEventAt(p.x, p.z);
+    if (G.taxiPed && Math.hypot(p.x - G.taxiPed.x, p.z - G.taxiPed.z) < 6) hud.setHint('E — pick up the fare');
+    else if (raceEv && !G.mission.active && !G.race.active) hud.setHint(`E — start the ${raceEv.name} street race ($${raceEv.prize})`);
+    else hud.setHint('WASD drive · Shift NOS · Space drift · E exit car · H honk · Q radio');
   }
 
   sound.siren(G.wanted, dt);

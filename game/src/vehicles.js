@@ -1,9 +1,12 @@
 // Vehicles: the player's car, traffic and police.
 // Arcade physics — no wheel simulation, just speed, heading and a steering angle, with
-// building collision and car-car push-out. Traffic follows the road graph (straight along one
-// road, random turn at each intersection). Police chase the player with a faster top speed and
-// ram; on-foot cops are handled in peds.js.
-import { CAR, CITY, NOS } from './config.js';
+// building collision and car-car push-out. Traffic follows the road graph (straight along
+// one road, random turn at each intersection). Police chase the player with a faster top
+// speed and ram; on-foot cops are handled in peds.js.
+// v3 reworks two systems in place: NOS now builds HEAT on a long burn (overheat locks it
+// out for a few seconds), and the helicopter now ORBITS the player with a sweeping
+// spotlight and calls in fresh ground units at 5 stars instead of hovering dead overhead.
+import { CAR, CITY, NOS, HELI } from './config.js';
 import { collideBuildings, nearestRoadPoint, randomRoadPoint } from './world.js';
 import { pick, clamp } from './random.js';
 
@@ -12,9 +15,11 @@ export function makeCar(x, z, angle, color, opts = {}) {
     x, z, angle, speed: 0, steer: 0,
     color, police: !!opts.police, traffic: !!opts.traffic,
     parked: !!opts.parked, stolen: false, hp: 100,
-    // v2: NOS tank (0-100) + drift state. NOS is spent by the driver, refilled
-    // slowly, at the safehouse, or bought at the shop.
+    // NOS tank (0-100) + drift state. NOS is spent by the driver, refilled slowly,
+    // at the safehouse, or bought at the shop. v3: nosHeat builds while boosting and
+    // nosLockout counts down after an overheat — both start at zero.
     nos: NOS.max, drifting: false, nosActive: false,
+    nosHeat: 0, nosLockout: 0,
     // traffic AI
     axis: opts.axis || 'z', dir: opts.dir || 1, cruise: opts.cruise || 9,
     targetSpeed: opts.cruise || 9,
@@ -24,24 +29,49 @@ export function makeCar(x, z, angle, color, opts = {}) {
   };
 }
 
-// v2: the SBPD helicopter. No mesh here — just the numbers; render.js draws it.
-// It hovers above the player, keeps pace, and its spotlight marks the player.
+// The SBPD helicopter (v2, reworked in v3). No mesh here — just the numbers;
+// render.js draws it. v3 fields: orbitA (angle around the player), callT (countdown
+// to the next reinforcement call at 5 stars), callReinforcements (set true when a
+// call goes out — main.js consumes it and spawns a fresh police car).
 export function makeHeli(x, z) {
-  return { x, z, y: 34, angle: 0, rotor: 0, spotX: x, spotZ: z, mesh: null, rotorMesh: null, spotMesh: null };
+  return {
+    x, z, y: HELI.hoverHeight, angle: 0, rotor: 0,
+    spotX: x, spotZ: z, mesh: null, rotorMesh: null, spotMesh: null,
+    orbitA: Math.atan2(z, x), callT: HELI.callSec, callReinforcements: false,
+  };
 }
 
-export function stepHeli(heli, targetX, targetZ, dt) {
-  const dx = targetX - heli.x, dz = targetZ - heli.z;
+// v3 heli AI: orbit the player at HELI.orbitRadius, altitude breathing between 30
+// and 40 m, spotlight sweeping a few metres ahead of the player's direction of
+// travel. At 5 stars the countdown runs and every HELI.callSec seconds it flags a
+// reinforcement call (main.js spawns the car and clears the flag).
+export function stepHeli(heli, targetX, targetZ, dt, wanted = 4, targetAngle = 0) {
+  heli.orbitA += HELI.orbitSpeed * dt;
+  const r = HELI.orbitRadius;
+  const wantX = targetX + Math.cos(heli.orbitA) * r;
+  const wantZ = targetZ + Math.sin(heli.orbitA) * r;
+  const dx = wantX - heli.x, dz = wantZ - heli.z;
   const dist = Math.hypot(dx, dz);
-  const sp = Math.min(26, dist * 0.8 + 8);
+  const sp = Math.min(HELI.followSpeed, dist * 0.9 + 6);
   if (dist > 0.5) {
     heli.x += (dx / dist) * sp * dt;
     heli.z += (dz / dist) * sp * dt;
-    heli.angle = Math.atan2(dx, dz);
   }
+  heli.angle = Math.atan2(targetX - heli.x, targetZ - heli.z);
+  heli.y = HELI.hoverHeight + Math.sin(heli.orbitA * 2) * 5;
   heli.rotor += dt * 38;
-  heli.spotX = targetX;
-  heli.spotZ = targetZ;
+  // Spotlight sweeps ahead of where the player is heading, not straight down.
+  heli.spotX = targetX + Math.sin(targetAngle) * 10;
+  heli.spotZ = targetZ + Math.cos(targetAngle) * 10;
+  if (wanted >= 5) {
+    heli.callT -= dt;
+    if (heli.callT <= 0) {
+      heli.callT = HELI.callSec;
+      heli.callReinforcements = true;
+    }
+  } else {
+    heli.callT = HELI.callSec;
+  }
   return heli;
 }
 
@@ -50,26 +80,37 @@ function carForward(car) {
 }
 
 // One physics step for a driven car. `drive` is -1..1 (throttle), `steerIn` -1..1,
-// handbrake bool (Space: drift), `nos` bool (Shift: NOS boost, v2).
+// handbrake bool (Space: drift), `nos` bool (Shift: NOS boost).
 export function stepDrivenCar(car, drive, steerIn, handbrake, dt, city, nos = false) {
   const targetSteer = steerIn * CAR.steer;
   car.steer += (targetSteer - car.steer) * Math.min(1, dt * 8);
   const accel = drive > 0 ? CAR.accel * drive : drive < 0 ? -CAR.reverseAccel : 0;
   car.speed += accel * dt;
   if (drive === 0) car.speed -= car.speed * Math.min(1, dt * 1.2); // rolling drag
-  // v2 drift: handbrake cuts grip — the car slides, turns sharper, and NOS refills.
+  // Drift: handbrake cuts grip — the car slides, turns sharper, and NOS refills.
   car.drifting = !!handbrake && Math.abs(car.speed) > 8;
   if (handbrake) {
     car.speed -= car.speed * Math.min(1, dt * 2.2);
     car.nos = clamp(car.nos + NOS.driftRefundPerSec * dt, 0, NOS.max);
   }
-  // v2 NOS: hold Shift while moving forward. Burns the tank, lifts the top speed.
-  car.nosActive = !!nos && car.nos > 0 && drive > 0 && car.speed > 4;
+  // v3 NOS with heat: hold Shift while moving forward. Burns the tank, lifts the top
+  // speed — but a continuous burn builds heat, and past the overheat point the kit
+  // locks out until it cools. Heat bleeds off fast when you are not boosting.
+  if (car.nosLockout > 0) car.nosLockout = Math.max(0, car.nosLockout - dt);
+  const wantNos = !!nos && car.nos > 0 && drive > 0 && car.speed > 4 && car.nosLockout <= 0;
+  car.nosActive = wantNos;
   if (car.nosActive) {
     car.nos = clamp(car.nos - NOS.drainPerSec * dt, 0, NOS.max);
+    car.nosHeat += dt;
     car.speed += CAR.accel * 0.9 * dt;
+    if (car.nosHeat >= NOS.overheatAfterSec) {
+      car.nosActive = false;
+      car.nosLockout = NOS.lockoutSec;
+      car.nosHeat = 0;
+    }
   } else {
     car.nos = clamp(car.nos + NOS.regenPerSec * dt, 0, NOS.max);
+    car.nosHeat = Math.max(0, car.nosHeat - dt * 2);
   }
   const maxF = car.nosActive ? CAR.maxSpeed * NOS.boostMult : CAR.maxSpeed;
   const maxR = -CAR.maxReverse;
@@ -84,8 +125,8 @@ export function stepDrivenCar(car, drive, steerIn, handbrake, dt, city, nos = fa
   const p = { x: car.x, z: car.z };
   if (collideBuildings(city, p, CAR.length / 2)) {
     car.x = p.x; car.z = p.z;
-    // v2 (revision): a hard wall hit damages the car — this is what makes the
-    // smuggle mission's damage rule real, and what the safehouse repairs.
+    // A hard wall hit damages the car — this is what makes the smuggle mission's
+    // damage rule real, and what the safehouse repairs.
     if (Math.abs(car.speed) > 12) car.hp = Math.max(0, car.hp - 6);
     car.speed *= -0.25; // bounce off the wall
   }

@@ -1,7 +1,9 @@
-// Every tuning number and colour for Solmar Heist in one place.
-// The city is a grid: BLOCKS x BLOCKS blocks, each BLOCK metres wide with a ROAD between them.
+// Solmar Heist v3 — every tuning number and colour in one place.
+// The city is a grid: BLOCKS x BLOCKS blocks, each BLOCK metres wide with a ROAD
+// between them. v3: 14 named districts, a fourth radio station, a rifle, two more
+// story jobs (10 total) and three street-race circuits.
 export const STEP = 1 / 60;
-export const SAVE_KEY = 'solmar-heist.save.v1';
+export const SAVE_KEY = 'solmar-heist.save.v3';
 
 export const CITY = {
   blocks: 8,          // blocks per side
@@ -33,32 +35,43 @@ export const CAR = {
   width: 2.0,
 };
 
-// NOS boost (v2): hold Shift in a car to burn NOS. Top speed rises ~45% while the
-// tank lasts; drifting (Space handbrake) refills a little of it. The tank refills
-// slowly on its own and fully at the safehouse garage.
+// NOS boost (v2, reworked in v3): hold Shift in a car to burn NOS. Top speed rises
+// ~45% while the tank lasts; drifting (Space handbrake) refills a little of it. The
+// tank refills slowly on its own and fully at the safehouse garage. v3 adds heat: a
+// continuous burn longer than OVERHEAT_AFTER seconds overheats the kit and locks NOS
+// out for LOCKOUT seconds — feather the boost on long straights, don't hold it flat.
 export const NOS = {
   max: 100,
-  drainPerSec: 42,
+  drainPerSec: 30,
   regenPerSec: 3.5,
   driftRefundPerSec: 9,
   boostMult: 1.45,
   refillPrice: 100,
+  overheatAfterSec: 3,
+  lockoutSec: 4,
 };
 
-// Police helicopter (v2): appears at 4-5 stars, hovers above the player with a
-// spotlight, blocks wanted decay while overhead, and nudges ground units in.
+// Police helicopter (v2, reworked in v3): appears at 4-5 stars. v3 it ORBITS the
+// player at a fixed radius instead of hovering dead overhead, its spotlight sweeps
+// ahead of the car, and at 5 stars it calls in a fresh ground unit every CALL_SEC
+// seconds. It still blocks wanted decay while it watches.
 export const HELI = {
   minWanted: 4,
   hoverHeight: 34,
   followSpeed: 26,
   spotRadius: 14,
   rotorHz: 11,
+  orbitRadius: 30,
+  orbitSpeed: 0.55,   // rad/s around the player
+  callSec: 20,        // seconds between reinforcement calls at 5 stars
 };
 
 export const WEAPONS = {
   pistol: { name: 'PISTOL', damage: 34, cooldown: 0.3, price: 0 },
   smg: { name: 'SMG', damage: 18, cooldown: 0.09, price: 0 },
   shotgun: { name: 'SHOTGUN', damage: 16, pellets: 5, cooldown: 0.85, price: 600, ammo: 24 },
+  // v3: the rifle — long range, heavy single shots, the fourth weapon. Bought at the shop.
+  rifle: { name: 'RIFLE', damage: 55, cooldown: 0.7, price: 900, ammo: 20, range: 80 },
 };
 
 export const SHOP = {
@@ -67,12 +80,21 @@ export const SHOP = {
   smgAmmoAmount: 60,
   nosPrice: 100,
   healthPrice: 120,
+  riflePrice: 900,
+  rifleAmmoPrice: 180,
+  rifleAmmoAmount: 20,
+  shotgunShellPrice: 120,
+  shotgunShellAmount: 12,
 };
 
-// Solmar Bay has 12 named districts (v2): the HUD names the one you are in, and the
-// race / smuggle missions route through them. Grid is 8x8 blocks; districts are
-// 2x2-block quarters plus the marina / old town corners.
+// Solmar Bay has 14 named districts (v3: +2). The HUD names the one you are in, and
+// the race / smuggle missions route through them. Grid is 8x8 blocks; districts are
+// 2x2-block quarters plus the marina / old town corners. districtAt returns the FIRST
+// match, so the two v3 districts sit first in the list — their patches win over the
+// quarter that also covers them (the v2 overlap districts listed last never showed).
 export const DISTRICTS = [
+  { name: 'El Faro Point', x0: 116, z0: -232, x1: 232, z1: -116 },
+  { name: 'Villa Solana', x0: 0, z0: 116, x1: 116, z1: 232 },
   { name: 'Delia Row', x0: -232, z0: -232, x1: -58, z1: -58 },
   { name: 'Fishmarket', x0: -58, z0: -232, x1: 116, z1: -58 },
   { name: 'North Docks', x0: 116, z0: -232, x1: 232, z1: -58 },
@@ -87,12 +109,13 @@ export const DISTRICTS = [
   { name: 'Cayo Verde', x0: 116, z0: 0, x1: 232, z1: 116 },
 ];
 
-// Car radio (v2): three switchable synth stations, Q cycles. No audio files — the
+// Car radio (v3: four switchable synth stations, Q cycles). No audio files — the
 // sound module synthesises each station's loop live.
 export const RADIO = [
   { name: 'SOLMAR FM 88.5', tag: 'sunset pop', tempo: 112, scale: [0, 2, 4, 7, 9], root: 220 },
   { name: 'BAY 101 BASS', tag: 'night drive', tempo: 96, scale: [0, 3, 5, 7, 10], root: 110 },
   { name: 'PALM AM 1420', tag: 'old gold', tempo: 132, scale: [0, 4, 5, 7, 11], root: 262 },
+  { name: 'TIDE 96.9', tag: 'island soul', tempo: 88, scale: [0, 3, 5, 8, 10], root: 175 },
 ];
 
 export const WANTED = {
@@ -102,6 +125,21 @@ export const WANTED = {
   bustRange: 3.0,     // cop must be this close on foot to bust you
   bustTime: 1.4,      // seconds inside bust range to get busted
 };
+
+// Street races (v3): repeatable time-trial circuits with two rivals. Start one by
+// pressing E at its start flag when no story job is running. Finish all gates before
+// the clock runs out; beat both rivals and the prize pays 1.5x.
+export const RACE_EVENTS = [
+  { id: 'sunset', name: 'Sunset Sprint', prize: 400, time: 90,
+    start: { x: -167, z: -167 },
+    gates: [{ x: -167, z: -167 }, { x: 65, z: -167 }, { x: 181, z: -51 }, { x: 123, z: 181 }, { x: -51, z: 181 }] },
+  { id: 'bayfront', name: 'Bayfront Loop', prize: 650, time: 120,
+    start: { x: 65, z: -167 },
+    gates: [{ x: 65, z: -167 }, { x: 181, z: -51 }, { x: 123, z: 181 }, { x: -51, z: 181 }, { x: -167, z: 51 }, { x: -167, z: -167 }] },
+  { id: 'cayo', name: 'Cayo Verde GP', prize: 900, time: 150,
+    start: { x: 181, z: -51 },
+    gates: [{ x: 181, z: -51 }, { x: 123, z: 181 }, { x: -51, z: 181 }, { x: -167, z: 51 }, { x: -167, z: -167 }, { x: 65, z: -167 }, { x: 181, z: 51 }] },
+];
 
 export const MISSIONS = [
   { id: 'wheels', name: '1 · Wheels', pay: 300,
@@ -123,11 +161,17 @@ export const MISSIONS = [
     brief: 'A hot car full of Delia’s cargo. Deliver it to the marina — quietly.',
     detail: 'Steal the marked car at the docks, then drive it to the marina without wrecking it. Damage over 60% voids the pay.' },
   { id: 'race', name: '7 · Bayfront Grand Prix', pay: 1500,
-    brief: 'An illegal street race across all twelve districts. NOS is legal here.',
+    brief: 'An illegal street race across all fourteen districts. NOS is legal here.',
     detail: 'Hit all 6 race gates in order before the 110-second clock runs out. Shift for NOS, Space to drift the corners.' },
   { id: 'finale', name: '8 · The Delia Gambit', pay: 3000,
     brief: 'One last job: rob the SBPD evidence vault, then lose the helicopter.',
     detail: 'Reach SBPD Central, hold E for 4 seconds, then survive 75 seconds at 5 stars with the helicopter on you — then reach the safehouse.' },
+  { id: 'harbor', name: '9 · Harbor Heist', pay: 1800,
+    brief: 'Delia’s crates are sitting on the North Docks under Gull watch. Load them and go.',
+    detail: 'Reach the docks marker, hold E for 3 seconds to load the crates, then drive them back to Delia’s garage.' },
+  { id: 'crown', name: '10 · The Solmar Crown', pay: 4000,
+    brief: 'The Crown Casino’s counting room. The biggest score in Solmar Bay — and the loudest.',
+    detail: 'Reach the Crown Casino, hold E for 5 seconds to crack the counting room, survive 90 seconds at 5 stars with the helicopter calling in backup, then vanish into the safehouse.' },
 ];
 
 export const PALETTE = {

@@ -4,6 +4,8 @@
 // tracers and the mission beacon. v2 adds the police helicopter (body + spinning rotor +
 // spotlight cone), green/amber beacons for the safehouse and shop, and a NOS flame
 // cone behind a boosting car — all built from primitives, no new assets.
+// v3 adds blue race-gate beams for the street-race circuits, a gold casino beacon, and
+// aims the helicopter spotlight at the player's position instead of straight down.
 import * as THREE from 'three';
 import { CITY, PALETTE } from './config.js';
 
@@ -179,10 +181,10 @@ export function createRenderer(canvas, city) {
   }
 
   // Landmark signs: floating coloured beacons so the player can find places.
-  // v2: safehouse beacons are green, the shop is amber, the rest stay gold.
+  // Safehouse beacons are green, the shop is amber, the casino is gold, the rest stay gold.
   const landmarkMeshes = {};
   for (const lm of Object.values(city.landmarks)) {
-    const beaconColor = lm.id === 'safehouse' ? 0x58c96b : lm.id === 'shop' ? 0xffb02e : 0xffd23e;
+    const beaconColor = lm.id === 'safehouse' ? 0x58c96b : lm.id === 'shop' ? 0xffb02e : lm.id === 'casino' ? 0xc9a227 : 0xffd23e;
     const beacon = new THREE.Mesh(
       new THREE.CylinderGeometry(0.5, 0.5, 14, 8),
       new THREE.MeshBasicMaterial({ color: beaconColor, transparent: true, opacity: 0.35 }),
@@ -207,6 +209,26 @@ export function createRenderer(canvas, city) {
   markerRing.visible = false;
   scene.add(markerRing);
 
+  // v3: street-race gates — one blue beam + ring per gate of the active race,
+  // reused across races (max 7 gates in any circuit).
+  const raceBeams = [];
+  for (let i = 0; i < 7; i += 1) {
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.2, 1.2, 40, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x4fa8e8, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    beam.visible = false;
+    scene.add(beam);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.5, 3.6, 24),
+      new THREE.MeshBasicMaterial({ color: 0x4fa8e8, transparent: true, opacity: 0.8, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.visible = false;
+    scene.add(ring);
+    raceBeams.push({ beam, ring });
+  }
+
   // Pickups: spinning green crosses (health) / gold boxes (SMG).
   const pickupMeshes = [];
   for (const pk of city.pickups) {
@@ -224,7 +246,7 @@ export function createRenderer(canvas, city) {
   playerMesh.add(cap);
   scene.add(playerMesh);
 
-  // v2: police helicopter — dark body, glass nose, tail boom, spinning rotor,
+  // Police helicopter — dark body, glass nose, tail boom, spinning rotor,
   // and a spotlight cone that tracks the player. Built once, moved in sync().
   const heliGroup = new THREE.Group();
   const heliBody = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.6, 5.2), new THREE.MeshLambertMaterial({ color: 0x1e2a3a }));
@@ -253,7 +275,7 @@ export function createRenderer(canvas, city) {
   heliGroup.visible = false;
   scene.add(heliGroup);
 
-  // v2: NOS flame — a small orange cone behind the player's car while boosting.
+  // NOS flame — a small orange cone behind the player's car while boosting.
   const nosFlame = new THREE.Mesh(
     new THREE.ConeGeometry(0.55, 2.2, 8),
     new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.9 }),
@@ -340,9 +362,10 @@ export function createRenderer(canvas, city) {
       const swing = state.player.moving ? Math.sin(time * 11) * 0.55 : 0;
       playerMesh.userData.legL.rotation.x = swing;
       playerMesh.userData.legR.rotation.x = -swing;
-      // Cars: parked, traffic, police — plus the car the player is driving, which lives
-      // outside those lists (it was spliced out of parked/traffic when stolen).
-      for (const car of [...state.parked, ...state.traffic, ...state.police]) syncCar(car, time);
+      // Cars: parked, traffic, police, race rivals — plus the car the player is
+      // driving, which lives outside those lists (it was spliced out of
+      // parked/traffic when stolen).
+      for (const car of [...state.parked, ...state.traffic, ...state.police, ...(state.raceRivals || [])]) syncCar(car, time);
       if (state.player.inCar && state.player.car) syncCar(state.player.car, time);
       // Peds
       for (const ped of state.peds) syncPed(ped, time);
@@ -361,6 +384,30 @@ export function createRenderer(canvas, city) {
         markerBeam.visible = false;
         markerRing.visible = false;
       }
+      // v3: race gates — the next gate burns brighter, cleared gates dim.
+      const race = state.race;
+      if (race && race.active && race.event) {
+        const gates = race.event.gates;
+        gates.forEach((g, i) => {
+          const slot = raceBeams[i];
+          if (!slot) return;
+          slot.beam.visible = true;
+          slot.ring.visible = true;
+          slot.beam.position.set(g.x, 20, g.z);
+          slot.ring.position.set(g.x, 0.08, g.z);
+          const next = i === race.gateIndex;
+          const s = next ? 1 + Math.sin(time * 4) * 0.15 : 0.8;
+          slot.ring.scale.set(s, s, 1);
+          slot.beam.material.opacity = next ? 0.5 : 0.18;
+          slot.ring.material.opacity = next ? 0.95 : 0.4;
+        });
+        for (let i = gates.length; i < raceBeams.length; i += 1) {
+          raceBeams[i].beam.visible = false;
+          raceBeams[i].ring.visible = false;
+        }
+      } else {
+        for (const slot of raceBeams) { slot.beam.visible = false; slot.ring.visible = false; }
+      }
       // Pickups spin / hide when taken
       state.city.pickups.forEach((pk, i) => {
         const mesh = pickupMeshes[i];
@@ -373,7 +420,8 @@ export function createRenderer(canvas, city) {
       for (const [id, mesh] of Object.entries(landmarkMeshes)) {
         mesh.position.y = 7 + Math.sin(time * 1.2 + id.length) * 0.6;
       }
-      // v2: helicopter — visible at 4-5 stars, rotor spins, spotlight tracks the player.
+      // Helicopter — visible at 4-5 stars, rotor spins. v3: the spotlight cone
+      // tilts toward the spotlight target instead of hanging straight down.
       if (state.heli) {
         const h = state.heli;
         heliGroup.visible = true;
@@ -381,13 +429,15 @@ export function createRenderer(canvas, city) {
         heliGroup.rotation.y = h.angle;
         heliRotor.rotation.y = h.rotor;
         heliRotor2.rotation.y = h.rotor + Math.PI / 2;
-        // Spotlight cone stays vertical: the heli hovers almost directly above
-        // the player, so a vertical cone already covers the spotlight target.
-        heliSpot.rotation.set(0, 0, 0);
+        const sx = (h.spotX || h.x) - h.x;
+        const sz = (h.spotZ || h.z) - h.z;
+        const tilt = Math.min(0.35, Math.hypot(sx, sz) / 60);
+        const tiltDir = Math.atan2(sx, sz);
+        heliSpot.rotation.set(Math.cos(tiltDir) * tilt, 0, -Math.sin(tiltDir) * tilt);
       } else {
         heliGroup.visible = false;
       }
-      // v2: NOS flame behind the player's car while boosting.
+      // NOS flame behind the player's car while boosting.
       if (state.player.inCar && state.player.car && state.player.car.nosActive) {
         const car = state.player.car;
         const bx = Math.sin(car.angle), bz = Math.cos(car.angle);

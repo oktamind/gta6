@@ -1,1 +1,4 @@
 out/
+# v3: local build + screenshot scratch (never committed)
+shots-local/
+*.log

@@ -2,6 +2,9 @@
 // locally without a build step: `node serve.ts` serves game/ on http://localhost:8080.
 // It sends the MIME types a browser game needs, refuses any path outside game/, and otherwise
 // does nothing clever: this is a development convenience, not a web server for the internet.
+// v3: the port also honours MAKEFUN_PORT so screenshot harnesses can pick a free port
+// without editing the command line (flag still wins over the env var), and the server
+// answers HEAD with headers only so screenshot harnesses can probe a file cheaply.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
@@ -10,8 +13,6 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
 const args = process.argv.slice(2);
 const portIndex = args.indexOf('--port');
-// v2: the port also honours MAKEFUN_PORT so screenshot harnesses can pick a free
-// port without editing the command line (flag still wins over the env var).
 const envPort = Number(process.env.MAKEFUN_PORT ?? '');
 const requested = portIndex === -1 ? (Number.isInteger(envPort) ? envPort : 8080) : Number(args[portIndex + 1]);
 const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
@@ -68,10 +69,14 @@ createServer((request, response) => {
     'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
     'content-length': size,
     'cache-control': 'no-store',
-    // v2: keep the game off other sites' frames and out of MIME sniffing.
+    // Keep the game off other sites' frames and out of MIME sniffing.
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'SAMEORIGIN',
   });
+  if (request.method === 'HEAD') {
+    response.end();
+    return;
+  }
   createReadStream(file).pipe(response);
 }).listen(port, '127.0.0.1', () => {
   console.log(`game/ is on http://localhost:${port}`);

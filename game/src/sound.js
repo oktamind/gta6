@@ -1,8 +1,9 @@
 // Sound, all synthesized with WebAudio — no audio files, nothing fetched.
 // Engine hum (oscillator pitch follows speed), gunshots (noise burst), siren (two-tone loop
 // while wanted), pickup blips and a mission-complete jingle. M toggles mute.
-// v2 adds the car radio (three synth stations, Q cycles), a NOS whoosh, a helicopter
+// v2 adds the car radio (four synth stations in v3, Q cycles), a NOS whoosh, a helicopter
 // rotor thump, a drift screech and a shop till blip — all synthesized live.
+// v3 adds a rifle crack (deeper, longer than the pistol) and race countdown / win stingers.
 import { RADIO } from './config.js';
 
 export function createSound() {
@@ -123,7 +124,14 @@ export function createSound() {
     unlock() { ensure(); if (ctx && ctx.state === 'suspended') ctx.resume(); },
     toggleMute() { muted = !muted; return muted; },
     get muted() { return muted; },
-    shoot(isSmg) { noise(0.12, 0.35, isSmg ? 2600 : 1800); },
+    // v3: shoot takes the weapon kind — the rifle cracks deeper and longer than
+    // the pistol, the SMG stays a fast bark, the shotgun a wide thump.
+    shoot(kind) {
+      if (kind === 'smg') noise(0.12, 0.35, 2600);
+      else if (kind === 'shotgun') noise(0.22, 0.45, 1200);
+      else if (kind === 'rifle') { noise(0.28, 0.5, 900); blip(180, 0.18, 'sawtooth', 0.2); }
+      else noise(0.12, 0.35, 1800);
+    },
     punch() { noise(0.08, 0.25, 900); },
     pickup() { blip(880, 0.12, 'sine', 0.2); blip(1320, 0.18, 'sine', 0.15); },
     cash() { blip(660, 0.1, 'triangle', 0.2); setTimeout(() => blip(990, 0.16, 'triangle', 0.2), 90); },
@@ -160,6 +168,8 @@ export function createSound() {
     get radioStation() { return RADIO[radioStation % RADIO.length]; },
     radioToggle() { radioOn = !radioOn; return radioOn; },
     nos() { noise(0.45, 0.22, 3200); blip(1200, 0.3, 'sawtooth', 0.08); },
+    // v3: the overheat clunk — a short low thud when the NOS kit locks out.
+    nosOverheat() { blip(140, 0.25, 'square', 0.2); noise(0.15, 0.15, 600); },
     drift() { noise(0.18, 0.12, 5200); },
     heli(active, dt) {
       if (!ensure() || muted) { if (heliGain) heliGain.gain.value = 0; return; }
@@ -169,5 +179,8 @@ export function createSound() {
       heliGain.gain.value = 0.05;
     },
     till() { blip(1046, 0.1, 'triangle', 0.2); setTimeout(() => blip(1568, 0.18, 'triangle', 0.18), 90); },
+    // v3: street-race stingers — three countdown beeps and a rising win arpeggio.
+    raceBeep() { blip(660, 0.12, 'square', 0.18); },
+    raceWin() { [523, 659, 784, 1046, 1318].forEach((f, i) => setTimeout(() => blip(f, 0.2, 'triangle', 0.22), i * 100)); },
   };
 }

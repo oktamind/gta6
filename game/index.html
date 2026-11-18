@@ -28,6 +28,7 @@
   #armor { font-size: 15px; color: var(--blue); }
   #district { font-size: 13px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
   #radio { font-size: 14px; color: var(--amber); }
+  #race { font-size: 14px; color: var(--blue); display: none; }
   #nos-wrap { width: 200px; }
   #nos-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
   #nos-bar { height: 8px; background: #2a3342; border-radius: 4px; margin-top: 4px; overflow: hidden; }
@@ -83,6 +84,7 @@
   <div class="chip" id="armor">ARMOR 0</div>
   <div class="chip" id="nos-wrap"><div id="nos-label"><span>NOS</span><span id="nos-num">NOS 100%</span></div><div id="nos-bar"><div id="nos-fill"></div></div></div>
   <div class="chip" id="radio">&9834; SOLMAR FM 88.5</div>
+  <div class="chip" id="race">RACE</div>
 </div>
 <div class="hud" id="hud-top-right">
   <div class="chip" id="wanted">☆☆☆☆☆</div>
@@ -103,8 +105,9 @@
   <div class="panel">
     <h1>SOLMAR <span>HEIST</span></h1>
     <p class="story">Solmar Bay never sleeps, and neither do its debts. You are <b>Rae Vega</b>, a getaway driver
-    who just burned her last crew. Fixer <b>Delia Voss</b> has eight jobs that pay enough to buy your way out —
-    if the Solmar Bay Police Department — and its helicopter — does not catch you first.</p>
+    who just burned her last crew. Fixer <b>Delia Voss</b> has ten jobs that pay enough to buy your way out —
+    if the Solmar Bay Police Department — and its helicopter — does not catch you first. Between jobs,
+    the city's three street-race circuits pay cash to anyone fast enough to beat both rivals.</p>
     <ul class="keys">
       <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move / drive</li>
       <li><kbd>Mouse</kbd> Look (drag) &middot; <kbd>Click</kbd> Shoot</li>
@@ -112,11 +115,12 @@
       <li><kbd>Space</kbd> Jump &middot; <kbd>Space</kbd> Drift in car</li>
       <li><kbd>Q</kbd> Change radio station &middot; <kbd>R</kbd> Reload SMG</li>
       <li><kbd>P</kbd> Pause &amp; save &middot; <kbd>M</kbd> Sound &middot; <kbd>H</kbd> Honk</li>
-      <li><kbd>1</kbd>–<kbd>4</kbd> Buy at the shop (armor / ammo / NOS / shotgun)</li>
+      <li><kbd>1</kbd>–<kbd>5</kbd> Buy at the shop (armor / ammo / NOS / shotgun / rifle)</li>
       <li><kbd>E</kbd> at safehouse: repair, refill NOS, heal &amp; save</li>
     </ul>
-    <p>Steal cars, lose the heat, finish all eight jobs across twelve named districts. Wanted stars rise when the city sees you do it.
-    At four stars the SBPD helicopter comes for you. Save any time from the pause menu — progress, cash and completed jobs persist in this browser.</p>
+    <p>Steal cars, lose the heat, finish all ten jobs across fourteen named districts. Wanted stars rise when the city sees you do it.
+    At four stars the SBPD helicopter comes for you — it orbits overhead, sweeps its spotlight ahead of you, and at five stars
+    calls in fresh backup. Save any time from the pause menu — progress, cash and completed jobs persist in this browser.</p>
     <div class="btn-row">
       <button id="btn-start" type="button">Start the story</button>
       <button id="btn-continue" type="button" class="ghost">Continue saved game</button>

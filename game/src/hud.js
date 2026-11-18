@@ -16,6 +16,8 @@ export function createHud() {
     // v2 chips: radio station, NOS tank, district, armor, helicopter warning.
     radio: $('radio'), nosFill: $('nos-fill'), nosNum: $('nos-num'),
     district: $('district'), armor: $('armor'), heliWarn: $('heli-warn'),
+    // v3 chip: street-race status (timer + gate count while a race is running).
+    race: $('race'),
   };
   const mm = els.minimap.getContext('2d');
   let toastTimer = 0;
@@ -58,6 +60,20 @@ export function createHud() {
       mm.strokeStyle = '#ffd23e';
       mm.beginPath(); mm.arc(toX(m.x), toY(m.z), 10 + Math.sin(performance.now() / 300) * 2, 0, Math.PI * 2); mm.stroke();
     }
+    // v3: next race gate (blue ring) + race start flags (blue squares) on the minimap.
+    if (state.race && state.race.active && state.race.event) {
+      const gates = state.race.event.gates;
+      const g = gates[state.race.gateIndex];
+      if (g) {
+        mm.strokeStyle = '#4fa8e8';
+        mm.lineWidth = 2;
+        mm.beginPath(); mm.arc(toX(g.x), toY(g.z), 7, 0, Math.PI * 2); mm.stroke();
+      }
+    }
+    if (state.raceStarts) {
+      mm.fillStyle = '#4fa8e8';
+      for (const s of state.raceStarts) mm.fillRect(toX(s.x) - 3, toY(s.z) - 3, 6, 6);
+    }
     // Traffic (white) and peds (faint)
     mm.fillStyle = 'rgba(255,255,255,0.75)';
     for (const car of state.traffic) mm.fillRect(toX(car.x) - 1.5, toY(car.z) - 1.5, 3, 3);
@@ -74,6 +90,12 @@ export function createHud() {
     if (state.city.landmarks.shop) {
       const s = state.city.landmarks.shop;
       mm.fillStyle = '#ffb02e';
+      mm.fillRect(toX(s.x) - 3, toY(s.z) - 3, 6, 6);
+    }
+    // v3: casino (gold square) on the minimap.
+    if (state.city.landmarks.casino) {
+      const s = state.city.landmarks.casino;
+      mm.fillStyle = '#c9a227';
       mm.fillRect(toX(s.x) - 3, toY(s.z) - 3, 6, 6);
     }
     // v2: police helicopter (orange ring) on the minimap.
@@ -93,6 +115,13 @@ export function createHud() {
         mm.beginPath(); mm.arc(toX(ped.x), toY(ped.z), 3, 0, Math.PI * 2); mm.fill();
       }
     }
+    // v3: race rivals (purple dots) on the minimap.
+    if (state.raceRivals) {
+      mm.fillStyle = '#9b59b6';
+      for (const car of state.raceRivals) {
+        mm.beginPath(); mm.arc(toX(car.x), toY(car.z), 3, 0, Math.PI * 2); mm.fill();
+      }
+    }
     // Player arrow (rotates with facing)
     const p = state.player;
     mm.save();
@@ -110,6 +139,15 @@ export function createHud() {
     if (last[key] !== value) { last[key] = value; el.textContent = value; }
   }
 
+  // v3: weapon readout covers all four weapons, with the rifle's long-range ammo.
+  function weaponText(state) {
+    const p = state.player;
+    if (p.weapon === 'smg') return `SMG ${p.smgAmmo}`;
+    if (p.weapon === 'shotgun') return `SHOTGUN ${p.shotgunAmmo}`;
+    if (p.weapon === 'rifle') return `RIFLE ${p.rifleAmmo}`;
+    return 'PISTOL ∞';
+  }
+
   return {
     toast,
     update(state) {
@@ -118,8 +156,7 @@ export function createHud() {
       els.healthFill.style.width = `${hp}%`;
       setText(els.healthNum, 'hp', String(hp));
       els.vignette.style.opacity = hp < 35 ? String(0.4 + (35 - hp) / 35 * 0.5) : '0';
-      const weapon = state.player.weapon === 'smg' ? `SMG ${state.player.smgAmmo}` : state.player.weapon === 'shotgun' ? `SHOTGUN ${state.player.shotgunAmmo}` : 'PISTOL ∞';
-      setText(els.ammo, 'ammo', weapon);
+      setText(els.ammo, 'ammo', weaponText(state));
       // v2 chips: radio (only meaningful in a car), NOS tank, district, armor, heli.
       if (els.radio) {
         const st = RADIO[state.radioStation || 0];
@@ -128,11 +165,24 @@ export function createHud() {
       if (els.nosFill) {
         const nos = state.player.inCar && state.player.car ? Math.round(state.player.car.nos) : Math.round(state.nos || 100);
         els.nosFill.style.width = `${nos}%`;
-        setText(els.nosNum, 'nos', `NOS ${nos}%`);
+        // v3: the NOS chip flashes the overheat lockout so the player knows why
+        // the boost died (feather it — a flat 3-second burn overheats the kit).
+        const locked = state.player.inCar && state.player.car && state.player.car.nosLockout > 0;
+        setText(els.nosNum, 'nos', locked ? 'NOS OVERHEAT!' : `NOS ${nos}%`);
       }
       if (els.district) setText(els.district, 'district', state.district || 'Solmar Bay');
       if (els.armor) setText(els.armor, 'armor', `ARMOR ${Math.round(state.player.armor || 0)}`);
       if (els.heliWarn) els.heliWarn.style.display = state.heli ? 'block' : 'none';
+      // v3: race chip — only while a street race is running.
+      if (els.race) {
+        const r = state.race;
+        if (r && r.active && r.event) {
+          els.race.style.display = 'block';
+          setText(els.race, 'race', `RACE ${r.event.name} — gate ${r.gateIndex + 1}/${r.event.gates.length} · ${Math.ceil(r.timer)}s`);
+        } else {
+          els.race.style.display = 'none';
+        }
+      }
       const stars = '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted);
       setText(els.wanted, 'wanted', stars);
       els.wanted.classList.toggle('off', state.wanted === 0);

@@ -12,11 +12,13 @@ export const ACTION_RELOAD = 32;
 export const ACTION_INTERACT = 64;
 // v2: Q cycles the car radio, digits 1-4 buy at the shop, Space in a car is the
 // handbrake/drift (Shift in a car is NOS boost; on foot Shift is still sprint).
+// v3: digit 5 buys the rifle at the shop.
 export const ACTION_RADIO = 256;
 export const ACTION_SHOP1 = 512;
 export const ACTION_SHOP2 = 1024;
 export const ACTION_SHOP3 = 2048;
 export const ACTION_SHOP4 = 4096;
+export const ACTION_SHOP5 = 8192;
 
 const FORWARD = new Set(['KeyW', 'ArrowUp']);
 const BACK = new Set(['KeyS', 'ArrowDown']);
@@ -49,6 +51,7 @@ export function createInput(canvas) {
     else if (event.code === 'Digit2') actions |= ACTION_SHOP2;
     else if (event.code === 'Digit3') actions |= ACTION_SHOP3;
     else if (event.code === 'Digit4') actions |= ACTION_SHOP4;
+    else if (event.code === 'Digit5') actions |= ACTION_SHOP5;
     else if (event.code === 'KeyM') actions |= 128; // ACTION_MUTE
     if (FORWARD.has(event.code) || BACK.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code)) event.preventDefault();
   });
@@ -101,7 +104,7 @@ export function createInput(canvas) {
       actions = 0;
       return taken;
     },
-    // v2 held keys: NOS is Shift while driving, drift is Space while driving.
+    // Held keys: NOS is Shift while driving, drift is Space while driving.
     nosHeld() { return keys.has('ShiftLeft') || keys.has('ShiftRight'); },
     driftHeld() { return keys.has('Space'); },
   };
